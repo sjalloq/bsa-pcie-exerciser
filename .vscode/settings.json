@@ -1,0 +1,8 @@
+{
+  "[python]": {
+    "editor.defaultColorDecorators": "never",
+    "editor.formatOnType": false,
+    "editor.wordBasedSuggestions": "off",
+    "editor.tabSize": 4,
+  }
+}

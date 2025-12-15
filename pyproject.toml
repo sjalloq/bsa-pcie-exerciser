@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bsa-pcie-exerciser"
+version = "0.1.0"
+description = "ARM BSA/SBSA PCIe Exerciser implementation using LiteX/LitePCIe"
+readme = "README.md"
+license = {text = "BSD-2-Clause"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Shareef Jalloq", email = "shareef@jalloq.co.uk"},
+]
+keywords = [
+    "pcie",
+    "fpga",
+    "bsa",
+    "sbsa",
+    "arm",
+    "litex",
+    "litepcie",
+    "migen",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: System :: Hardware",
+]
+
+dependencies = [
+    "migen",
+    "litex",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "cocotb>=1.8",
+    "cocotb-test",
+]
+docs = [
+  "sphinx",
+  "sphinx-rtd-theme",
+  "sphinx-rtd-size",
+  "sphinxcontrib-images",
+]
+all = [
+    "bsa-pcie-exerciser[dev,docs]",
+]
+
+[project.urls]
+Homepage = "https://github.com/ARM-software/bsa-acs"
+Documentation = "https://github.com/ARM-software/bsa-acs/blob/main/docs/PCIe_Exerciser/Exerciser.md"
+Repository = "https://github.com/sjalloq/bsa-pcie-exerciser"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
