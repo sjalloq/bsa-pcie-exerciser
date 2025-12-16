@@ -1,7 +1,7 @@
 #
 # LitePCIe BAR Endpoint
 #
-# Copyright (c) 2024
+# Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Lightweight endpoint wrapper for single-BAR routing in multi-BAR designs.
