@@ -1,0 +1,10 @@
+.venv
+build/
+logs/
+
+__pycache__
+*.egg-info
+
+external/
+
+vivado.*

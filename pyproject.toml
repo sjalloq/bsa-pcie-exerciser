@@ -36,8 +36,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "migen",
+    "migen @ https://github.com/m-labs/migen.git",
     "litex",
+    "litepcie @ git+https://git@github.com/sjalloq/litepcie.git@feature/tlp-attributes",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +46,7 @@ dev = [
     "pytest>=7.0",
     "cocotb>=1.8",
     "cocotb-test",
+    "repopack",
 ]
 docs = [
   "sphinx",
@@ -55,6 +57,9 @@ docs = [
 all = [
     "bsa-pcie-exerciser[dev,docs]",
 ]
+
+[project.scripts]
+bsa-pcie-exerciser = "bsa_pcie_exerciser.bsa_pcie_exerciser:main"
 
 [project.urls]
 Homepage = "https://github.com/ARM-software/bsa-acs"
