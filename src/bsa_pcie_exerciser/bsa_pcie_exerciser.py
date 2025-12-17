@@ -28,8 +28,13 @@ from litepcie.tlp.depacketizer import LitePCIeTLPDepacketizer
 from litepcie.tlp.packetizer import LitePCIeTLPPacketizer
 from litepcie.frontend.wishbone import LitePCIeWishboneBridge
 
-from bsa_pcie_exerciser.litepcie.bar_routing import LitePCIeBARDispatcher, LitePCIeCompletionArbiter, LitePCIeMasterArbiter, LitePCIeStubBARHandler
-from bsa_pcie_exerciser.litepcie.multibar_endpoint import LitePCIeMultiBAREndpoint
+from bsa_pcie_exerciser.core import (
+    LitePCIeBARDispatcher,
+    LitePCIeCompletionArbiter,
+    LitePCIeMasterArbiter,
+    LitePCIeStubBARHandler,
+    LitePCIeMultiBAREndpoint,
+)
 
 # =============================================================================
 # Clock Reset Generator

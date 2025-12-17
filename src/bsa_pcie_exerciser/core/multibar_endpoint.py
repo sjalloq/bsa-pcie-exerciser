@@ -175,12 +175,38 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         # Master Completion Routing (depacketizer -> BARs, for DMA completions)
         # =====================================================================
         
-        # Completions need to go to the right BAR based on channel
-        # For now, broadcast to all (crossbar filters by channel internally)
-        # This matches how standard LitePCIeEndpoint works
-        for bar_num, sink in bar_master_sinks.items():
-            if bar_num in self.crossbars:
-                self.comb += self.depacketizer.cmp_source.connect(sink)
+        # Completions need to go to the right BAR based on channel.
+        # Broadcast to all master sinks - each crossbar filters by channel internally.
+        # Note: We can't use .connect() multiple times, so use explicit signals.
+        
+        active_master_sinks = {
+            bar_num: sink
+            for bar_num, sink in bar_master_sinks.items()
+            if bar_num in self.crossbars
+        }
+        
+        cmp_source = self.depacketizer.cmp_source
+        
+        for bar_num, sink in active_master_sinks.items():
+            self.comb += [
+                sink.valid.eq(cmp_source.valid),
+                sink.first.eq(cmp_source.first),
+                sink.last.eq(cmp_source.last),
+                sink.dat.eq(cmp_source.dat),
+                sink.len.eq(cmp_source.len),
+                sink.err.eq(cmp_source.err),
+                sink.end.eq(cmp_source.end),
+                sink.tag.eq(cmp_source.tag),
+                sink.adr.eq(cmp_source.adr),
+                sink.req_id.eq(cmp_source.req_id),
+                sink.cmp_id.eq(cmp_source.cmp_id),
+            ]
+        
+        # Ready when ANY sink accepts (crossbar handles channel filtering)
+        if len(active_master_sinks) > 0:
+            self.comb += cmp_source.ready.eq(
+                reduce(or_, [sink.ready for sink in active_master_sinks.values()])
+            )
         
         # =====================================================================
         # Convenience: expose BAR0 crossbar as 'crossbar' for compatibility

@@ -15,4 +15,5 @@ documentation for details.
    :maxdepth: 2
    :caption: Contents:
 
+   pcie/index
    litepcie/index
