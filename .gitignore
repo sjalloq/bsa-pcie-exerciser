@@ -1,6 +1,12 @@
 .venv
 build/
 logs/
+sim_build/
+*.log
+*.vcd
+*.fst
+*.xml
+*.init
 
 __pycache__
 *.egg-info
