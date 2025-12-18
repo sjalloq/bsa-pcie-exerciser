@@ -7,6 +7,12 @@
 # BAR2 handler providing PCIe-accessible MSI-X table storage.
 # Supports up to 2048 vectors (32KB table).
 #
+# Limitations:
+#   - Read requests support len=1 (32-bit) and len=2 (64-bit) only.
+#   - Multi-DWORD reads (len>2) are not supported; completion returns
+#     only the first 1-2 DWORDs. This is sufficient for typical MSI-X
+#     table access patterns (ARM sysarch-acs uses 32-bit accesses).
+#
 
 from migen import *
 from litex.gen import *
@@ -117,9 +123,8 @@ class LitePCIeMSIXTable(LiteXModule):
         # Byte address [14:3] gives QWORD index (bits 0-2 are byte offset within QWORD)
         qword_idx = Signal(12)
 
-        # Read pipeline
-        read_data_valid = Signal()
-        read_data       = Signal(64)
+        # Read data register
+        read_data = Signal(64)
 
         # ---------------------------------------------------------------------
         # IDLE State: Wait for request, capture header combinationally
@@ -142,7 +147,7 @@ class LitePCIeMSIXTable(LiteXModule):
                     NextState("WRITE"),
                 ).Else(
                     # Read request - start memory read
-                    NextState("READ"),
+                    NextState("READ_ADDR"),
                 ),
             ),
         )
@@ -154,6 +159,12 @@ class LitePCIeMSIXTable(LiteXModule):
         # Combinational write path - write happens when in WRITE state
         # or on first beat of write (IDLE -> WRITE transition)
         write_active = Signal()
+
+        # Combine first_be and last_be into 8-bit byte enable for 64-bit memory
+        # first_be: bytes 0-3 (lower DWORD)
+        # last_be: bytes 4-7 (upper DWORD)
+        write_be = Signal(8)
+        self.comb += write_be.eq(Cat(req_sink.first_be, req_sink.last_be))
 
         self.comb += [
             write_active.eq(
@@ -168,8 +179,8 @@ class LitePCIeMSIXTable(LiteXModule):
                 port_a.adr.eq(qword_idx),
             ),
 
-            # Byte enables and data come directly from request
-            port_a.we.eq(Replicate(write_active, 8) & req_sink.be),
+            # Write with byte enables from TLP
+            port_a.we.eq(Replicate(write_active, 8) & write_be),
             port_a.dat_w.eq(req_sink.dat),
         ]
 
@@ -188,21 +199,29 @@ class LitePCIeMSIXTable(LiteXModule):
         )
 
         # ---------------------------------------------------------------------
-        # READ State: Issue memory read, wait for data
+        # READ_ADDR State: Present address to memory
+        # ---------------------------------------------------------------------
+        #
+        # Memory has 1-cycle read latency (registered address). This state
+        # presents the address; data will be valid on the next cycle.
+
+        fsm.act("READ_ADDR",
+            port_a.adr.eq(qword_idx),
+            NextState("READ_DATA"),
+        )
+
+        # ---------------------------------------------------------------------
+        # READ_DATA State: Capture memory read data
         # ---------------------------------------------------------------------
 
-        fsm.act("READ",
-            # Memory read address
-            port_a.adr.eq(qword_idx),
-
-            # Wait one cycle for memory read latency
-            NextValue(read_data_valid, 1),
+        fsm.act("READ_DATA",
+            port_a.adr.eq(qword_idx),  # Hold address stable
             NextState("COMPLETE"),
         )
 
-        # Capture read data
+        # Capture read data when transitioning out of READ_DATA
         self.sync += [
-            If(fsm.ongoing("READ"),
+            If(fsm.ongoing("READ_DATA"),
                 read_data.eq(port_a.dat_r),
             ),
         ]
@@ -210,12 +229,34 @@ class LitePCIeMSIXTable(LiteXModule):
         # ---------------------------------------------------------------------
         # COMPLETE State: Send completion TLP
         # ---------------------------------------------------------------------
+        #
+        # For len=1 (32-bit): return upper or lower DWORD based on addr[2]
+        # For len=2 (64-bit): return full QWORD
+        # For len>2: only first 2 DWORDs returned (limitation documented above)
+
+        # Select DWORD for len=1 reads based on addr[2]
+        cpl_data = Signal(64)
+        self.comb += [
+            If(req_len == 1,
+                # Single DWORD - select based on addr[2]
+                If(req_adr[2],
+                    # Upper DWORD requested (offset 0x4 within QWORD)
+                    cpl_data.eq(read_data[32:64]),
+                ).Else(
+                    # Lower DWORD requested (offset 0x0 within QWORD)
+                    cpl_data.eq(read_data[0:32]),
+                ),
+            ).Else(
+                # Full QWORD (len >= 2)
+                cpl_data.eq(read_data),
+            ),
+        ]
 
         fsm.act("COMPLETE",
             cpl_source.valid.eq(1),
             cpl_source.first.eq(1),
             cpl_source.last.eq(1),
-            cpl_source.dat.eq(read_data),
+            cpl_source.dat.eq(cpl_data),
             cpl_source.len.eq(req_len),
             cpl_source.err.eq(0),
             cpl_source.end.eq(1),
@@ -225,7 +266,6 @@ class LitePCIeMSIXTable(LiteXModule):
             cpl_source.cmp_id.eq(phy.id),
 
             If(cpl_source.ready,
-                NextValue(read_data_valid, 0),
                 NextState("IDLE"),
             ),
         )
