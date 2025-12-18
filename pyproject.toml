@@ -36,9 +36,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "migen @ https://github.com/m-labs/migen.git",
-    "litex",
-    "litepcie @ git+https://git@github.com/sjalloq/litepcie.git@feature/tlp-attributes",
+    "migen @ git+https://github.com/m-labs/migen.git@4c2ae8dfeea37f235b52acb8166f12acaaae4f7c",
+    "litex @ git+https://github.com/enjoy-digital/litex.git@2025.08",
+    "litepcie @ git+https://github.com/sjalloq/litepcie.git@feature/tlp-attributes",
 ]
 
 [project.optional-dependencies]
