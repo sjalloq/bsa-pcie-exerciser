@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Migen testbench wrapper for MSI-X subsystem testing with Cocotb.
+# Software-triggered MSI-X only (matching BSA compliance requirements).
 #
 
 from migen import *
@@ -52,13 +53,11 @@ class MSIXTestbench(LiteXModule):
     - bar5_*: PBA request/completion (host access)
     - msi_*: MSI-X TLP output (Memory Writes to host)
     - sw_*: Software trigger interface
-    - irqs: Hardware IRQ inputs
     """
 
-    def __init__(self, data_width=64, n_vectors=2048, n_irqs=32):
+    def __init__(self, data_width=64, n_vectors=2048):
         self.data_width = data_width
         self.n_vectors = n_vectors
-        self.n_irqs = n_irqs
 
         # Clock domain
         self.cd_sys = ClockDomain("sys")
@@ -213,11 +212,8 @@ class MSIXTestbench(LiteXModule):
         ]
 
         # =====================================================================
-        # MSI-X Controller
+        # MSI-X Controller (Software-Triggered Only)
         # =====================================================================
-
-        # We need to create the controller manually since it normally
-        # gets a master port from an endpoint's crossbar.
 
         self.fsm = fsm = FSM(reset_state="IDLE")
 
@@ -225,45 +221,8 @@ class MSIXTestbench(LiteXModule):
         self.sw_vector = Signal(11)
         self.sw_valid  = Signal()
 
-        # Hardware IRQs
-        self.irqs = Signal(n_irqs)
-
-        # Pending hardware IRQs (sticky until serviced)
-        hw_pending = Signal(n_irqs)
-        hw_clear   = Signal(n_irqs)
-
-        self.sync += hw_pending.eq((hw_pending | self.irqs) & ~hw_clear)
-
-        # Priority encoder for hardware IRQs
-        hw_irq_valid  = Signal()
-        hw_irq_vector = Signal(11)
-
-        for i in reversed(range(n_irqs)):
-            self.comb += If(hw_pending[i],
-                hw_irq_valid.eq(1),
-                hw_irq_vector.eq(i),
-            )
-
-        # Vector selection - software has priority
-        trigger_valid  = Signal()
-        trigger_vector = Signal(11)
-        trigger_is_sw  = Signal()
-
-        self.comb += [
-            If(self.sw_valid,
-                trigger_valid.eq(1),
-                trigger_vector.eq(self.sw_vector),
-                trigger_is_sw.eq(1),
-            ).Elif(hw_irq_valid,
-                trigger_valid.eq(1),
-                trigger_vector.eq(hw_irq_vector),
-                trigger_is_sw.eq(0),
-            ),
-        ]
-
-        # Latched vector info
+        # Latched vector
         current_vector = Signal(11)
-        current_is_sw  = Signal()
 
         # Table read interface
         table = self.table
@@ -271,10 +230,9 @@ class MSIXTestbench(LiteXModule):
         port = self.master_port
 
         fsm.act("IDLE",
-            If(trigger_valid,
-                NextValue(current_vector, trigger_vector),
-                NextValue(current_is_sw, trigger_is_sw),
-                table.vector_num.eq(trigger_vector),
+            If(self.sw_valid,
+                NextValue(current_vector, self.sw_vector),
+                table.vector_num.eq(self.sw_vector),
                 table.read_en.eq(1),
                 NextState("READ_TABLE"),
             ),
@@ -312,9 +270,6 @@ class MSIXTestbench(LiteXModule):
             If(port.source.ready,
                 pba.vector_num.eq(current_vector),
                 pba.clear_pending.eq(1),
-                If(~current_is_sw & (current_vector < n_irqs),
-                    hw_clear.eq(1 << current_vector[:5]),  # Limit shift width
-                ),
                 NextState("IDLE"),
             ),
         )
@@ -342,7 +297,7 @@ def generate_verilog():
     from migen.fhdl.verilog import convert
 
     # Create testbench with reduced vector count for faster simulation
-    tb = MSIXTestbench(data_width=64, n_vectors=16, n_irqs=4)
+    tb = MSIXTestbench(data_width=64, n_vectors=16)
 
     # Convert to Verilog
     # We need to specify the ios (inputs/outputs) for the top-level module
@@ -409,9 +364,6 @@ def generate_verilog():
     ios.add(tb.sw_vector)
     ios.add(tb.sw_valid)
     ios.add(tb.busy)
-
-    # Hardware IRQs
-    ios.add(tb.irqs)
 
     # Generate Verilog
     output = convert(tb, ios=ios, name="tb_msix")

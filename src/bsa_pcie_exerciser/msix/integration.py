@@ -51,20 +51,16 @@ class LitePCIeMultiBAREndpointMSIX(LiteXModule):
         
     n_vectors : int
         Number of MSI-X vectors (default 2048).
-        
-    n_irqs : int
-        Number of hardware IRQ inputs (default 32).
-        
+
     with_bar1 : bool
         Enable BAR1 crossbar (default False).
     """
     
-    def __init__(self, phy, 
-                 endianness="big", 
-                 address_width=32, 
+    def __init__(self, phy,
+                 endianness="big",
+                 address_width=32,
                  max_pending_requests=4,
                  n_vectors=2048,
-                 n_irqs=32,
                  with_bar1=False):
         
         self.phy        = phy
@@ -142,7 +138,6 @@ class LitePCIeMultiBAREndpointMSIX(LiteXModule):
             endpoint = self,  # Pass self to get master port
             table    = msix_table,
             pba      = msix_pba,
-            n_irqs   = n_irqs,
         )
         
         self.msix_trigger = msix_trig = LitePCIeMSITrigger()
@@ -153,9 +148,6 @@ class LitePCIeMultiBAREndpointMSIX(LiteXModule):
             msix_ctrl.sw_valid.eq(msix_trig.trigger_valid),
             msix_trig.busy.eq(~msix_ctrl.fsm.ongoing("IDLE")),
         ]
-        
-        # Expose IRQ interface
-        self.irqs = msix_ctrl.irqs
         
         # =====================================================================
         # Stub Handlers (BAR3, BAR4)
@@ -334,22 +326,17 @@ def create_bsa_soc_with_msix(platform, sys_clk_freq=125e6):
                 endianness           = "big",
                 max_pending_requests = 4,
                 n_vectors            = 2048,
-                n_irqs               = 32,
                 with_bar1            = False,
             )
-            
+
             # Wishbone Bridge (BAR0 -> CSRs)
             self.pcie_bridge = LitePCIeWishboneBridge(self.pcie_endpoint,
                 base_address = self.mem_map["csr"],
             )
             self.bus.add_master(master=self.pcie_bridge.wishbone)
-            
+
             # Add MSI-X trigger CSR to BAR0
             # The trigger CSR is part of msix_trigger, needs to be added to CSR bus
             self.msix_trigger = self.pcie_endpoint.msix_trigger
-            
-            # Connect some internal IRQs (example)
-            # self.comb += self.pcie_endpoint.irqs[0].eq(dma_complete)
-            # self.comb += self.pcie_endpoint.irqs[1].eq(some_other_event)
-    
+
     return BSAExerciserSoCWithMSIX(platform, sys_clk_freq)

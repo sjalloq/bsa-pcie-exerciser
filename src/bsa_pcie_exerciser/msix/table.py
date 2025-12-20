@@ -130,8 +130,26 @@ class LitePCIeMSIXTable(LiteXModule):
         # IDLE State: Wait for request, capture header combinationally
         # ---------------------------------------------------------------------
 
+        # ---------------------------------------------------------------------
+        # Write data path - common signals
+        # ---------------------------------------------------------------------
+
+        # Combine first_be and last_be into 8-bit byte enable for 64-bit memory
+        # first_be: bytes 0-3 (lower DWORD)
+        # last_be: bytes 4-7 (upper DWORD)
+        write_be = Signal(8)
+        self.comb += [
+            write_be.eq(Cat(req_sink.first_be, req_sink.last_be)),
+            port_a.dat_w.eq(req_sink.dat),
+        ]
+
+        # ---------------------------------------------------------------------
+        # IDLE State: Wait for request
+        # ---------------------------------------------------------------------
+
         fsm.act("IDLE",
             req_sink.ready.eq(1),
+            port_a.adr.eq(req_sink.adr[3:15]),  # Live address for first beat
 
             If(req_sink.valid & req_sink.first,
                 # Capture request header
@@ -143,7 +161,8 @@ class LitePCIeMSIXTable(LiteXModule):
                 NextValue(qword_idx, req_sink.adr[3:15]),  # QWORD index
 
                 If(req_sink.we,
-                    # Write request - handle data on this beat
+                    # Write request - perform write on this beat
+                    port_a.we.eq(Replicate(1, 8) & write_be),
                     NextState("WRITE"),
                 ).Else(
                     # Read request - start memory read
@@ -153,41 +172,16 @@ class LitePCIeMSIXTable(LiteXModule):
         )
 
         # ---------------------------------------------------------------------
-        # WRITE State: Handle write data
+        # WRITE State: Handle continuation data (multi-beat writes)
         # ---------------------------------------------------------------------
-
-        # Combinational write path - write happens when in WRITE state
-        # or on first beat of write (IDLE -> WRITE transition)
-        write_active = Signal()
-
-        # Combine first_be and last_be into 8-bit byte enable for 64-bit memory
-        # first_be: bytes 0-3 (lower DWORD)
-        # last_be: bytes 4-7 (upper DWORD)
-        write_be = Signal(8)
-        self.comb += write_be.eq(Cat(req_sink.first_be, req_sink.last_be))
-
-        self.comb += [
-            write_active.eq(
-                (fsm.ongoing("IDLE") & req_sink.valid & req_sink.first & req_sink.we) |
-                (fsm.ongoing("WRITE") & req_sink.valid)
-            ),
-
-            # Memory write - address from captured value or live value
-            If(fsm.ongoing("IDLE"),
-                port_a.adr.eq(req_sink.adr[3:15]),
-            ).Else(
-                port_a.adr.eq(qword_idx),
-            ),
-
-            # Write with byte enables from TLP
-            port_a.we.eq(Replicate(write_active, 8) & write_be),
-            port_a.dat_w.eq(req_sink.dat),
-        ]
 
         fsm.act("WRITE",
             req_sink.ready.eq(1),
+            port_a.adr.eq(qword_idx),  # Captured address for continuation
 
             If(req_sink.valid,
+                # Perform write
+                port_a.we.eq(Replicate(1, 8) & write_be),
                 # Update QWORD index for multi-beat writes
                 NextValue(qword_idx, qword_idx + 1),
 
@@ -195,6 +189,9 @@ class LitePCIeMSIXTable(LiteXModule):
                     # Write complete
                     NextState("IDLE"),
                 ),
+            ).Else(
+                # No valid data - single-beat TLP already completed, return to IDLE
+                NextState("IDLE"),
             ),
         )
 
@@ -207,6 +204,7 @@ class LitePCIeMSIXTable(LiteXModule):
 
         fsm.act("READ_ADDR",
             port_a.adr.eq(qword_idx),
+            port_a.we.eq(0),  # No write during read
             NextState("READ_DATA"),
         )
 
@@ -216,6 +214,7 @@ class LitePCIeMSIXTable(LiteXModule):
 
         fsm.act("READ_DATA",
             port_a.adr.eq(qword_idx),  # Hold address stable
+            port_a.we.eq(0),  # No write during read
             NextState("COMPLETE"),
         )
 
@@ -253,6 +252,7 @@ class LitePCIeMSIXTable(LiteXModule):
         ]
 
         fsm.act("COMPLETE",
+            port_a.we.eq(0),  # No write during completion
             cpl_source.valid.eq(1),
             cpl_source.first.eq(1),
             cpl_source.last.eq(1),
