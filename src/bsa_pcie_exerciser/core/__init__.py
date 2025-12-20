@@ -14,3 +14,9 @@ from .multibar_endpoint import (
     LitePCIeMultiBAREndpoint,
     LitePCIeBAREndpoint,
 )
+from .bsa_registers import (
+    BSARegisters,
+    EXERCISER_VENDOR_ID,
+    EXERCISER_DEVICE_ID,
+    EXERCISER_COMBINED_ID,
+)

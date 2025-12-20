@@ -34,6 +34,8 @@ from bsa_pcie_exerciser.core import (
     LitePCIeMasterArbiter,
     LitePCIeStubBARHandler,
     LitePCIeMultiBAREndpoint,
+    BSARegisters,
+    EXERCISER_COMBINED_ID,
 )
 
 # =============================================================================
@@ -69,17 +71,17 @@ class _CRG(LiteXModule):
 # =============================================================================
 
 class TestCSRs(LiteXModule):
-    """Simple test CSRs to verify PCIe BAR0 access."""
+    """Simple test CSRs to verify PCIe BAR0 access (legacy, for testing only)."""
     def __init__(self):
         self.scratch = CSRStorage(32, reset=0xDEADBEEF,
             description="Scratch register for testing")
-        self.id = CSRStatus(32, reset=0xB5A00002,  # Version 2 for Phase 2
+        self.id = CSRStatus(32, reset=EXERCISER_COMBINED_ID,
             description="BSA Exerciser ID")
         self.counter = CSRStatus(32,
             description="Free-running counter")
         self.leds = CSRStorage(4, reset=0,
             description="LED control")
-        
+
         counter = Signal(32)
         self.sync += counter.eq(counter + 1)
         self.comb += self.counter.status.eq(counter)
@@ -124,8 +126,16 @@ class BSAExerciserSoC(SoCMini):
         )
         
         # Multi-BAR Configuration -------------------------------------------------
-        # Configure the Xilinx PCIe IP for multiple BARs
+        # Configure the Xilinx PCIe IP for multiple BARs and Device ID
         self.pcie_phy.update_config({
+            # Device Identification (ARM BSA Exerciser)
+            "Vendor_ID"          : 0x13B5,   # ARM Ltd.
+            "Device_ID"          : 0xED01,   # BSA Exerciser
+            "Revision_ID"        : 0x01,
+            "Subsystem_Vendor_ID": 0x13B5,
+            "Subsystem_ID"       : 0xED01,
+            "Class_Code"         : 0xFF0000, # Unclassified device
+
             # BAR0: CSRs (4KB)
             "Bar0_Enabled"      : True,
             "Bar0_Scale"        : "Kilobytes",
@@ -190,16 +200,29 @@ class BSAExerciserSoC(SoCMini):
         )
         self.bus.add_master(master=self.pcie_bridge.wishbone)
         
-        # Test CSRs ---------------------------------------------------------------
+        # BSA Registers -----------------------------------------------------------
+        # Full ARM BSA Exerciser register set with explicit address mapping
+        self.bsa_regs = BSARegisters()
+
+        # Add BSA registers as Wishbone slave at base of BAR0
+        # The Wishbone bridge maps BAR0 to the SoC bus starting at mem_map["csr"]
+        from litex.soc.integration.soc import SoCRegion
+        self.bus.add_slave(
+            name="bsa_regs",
+            slave=self.bsa_regs.bus,
+            region=SoCRegion(origin=self.mem_map["csr"], size=0x100, cached=False),
+        )
+
+        # Legacy Test CSRs (at higher address for backward compatibility)
         self.test_csrs = TestCSRs()
-        
+
         # LEDs --------------------------------------------------------------------
         try:
             leds = platform.request_all("user_led")
             self.comb += leds.eq(self.test_csrs.leds.storage)
         except:
             pass
-        
+
         # MSI (placeholder - Phase 3 will add full MSI-X) -------------------------
         self.pcie_msi = LitePCIeMSI()
         self.comb += self.pcie_msi.source.connect(self.pcie_phy.msi)
