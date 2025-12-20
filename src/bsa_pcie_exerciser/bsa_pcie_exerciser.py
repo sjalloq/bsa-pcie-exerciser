@@ -38,6 +38,12 @@ from bsa_pcie_exerciser.core import (
     EXERCISER_COMBINED_ID,
 )
 
+from bsa_pcie_exerciser.dma import (
+    BSADMABuffer,
+    BSADMABufferHandler,
+    BSADMAEngine,
+)
+
 # =============================================================================
 # Clock Reset Generator
 # =============================================================================
@@ -186,12 +192,26 @@ class BSAExerciserSoC(SoCMini):
             self.crg.cd_sys.clk,
             self.pcie_phy.cd_pcie.clk
         )
-        
+
+        # DMA Buffer and Handler --------------------------------------------------
+        # Create before endpoint so we can pass handler to it
+        self.dma_buffer = BSADMABuffer(
+            size       = 16*1024,  # 16KB buffer
+            data_width = self.pcie_phy.data_width,
+        )
+
+        self.dma_handler = BSADMABufferHandler(
+            phy        = self.pcie_phy,
+            buffer     = self.dma_buffer,
+            data_width = self.pcie_phy.data_width,
+        )
+
         # PCIe Endpoint -----------------------------------------------------------
         self.pcie_endpoint = LitePCIeMultiBAREndpoint(self.pcie_phy,
             endianness           = "big",
             max_pending_requests = 4,
-            bar_enables= {0: True, 1: False, 2: False, 3: False, 4: False, 5: False }
+            bar_enables  = {0: True, 1: False, 2: False, 3: False, 4: False, 5: False},
+            bar_handlers = {1: self.dma_handler},  # BAR1 handled by DMA buffer handler
         )
         
         # Wishbone Bridge (BAR0 -> CSRs) ------------------------------------------
@@ -212,6 +232,39 @@ class BSAExerciserSoC(SoCMini):
             slave=self.bsa_regs.bus,
             region=SoCRegion(origin=self.mem_map["csr"], size=0x100, cached=False),
         )
+
+        # DMA Engine --------------------------------------------------------------
+        self.dma_engine = BSADMAEngine(
+            phy              = self.pcie_phy,
+            buffer           = self.dma_buffer,
+            data_width       = self.pcie_phy.data_width,
+            max_request_size = 128,
+        )
+
+        # Connect DMA engine control signals to BSA registers
+        self.comb += [
+            self.dma_engine.trigger.eq(self.bsa_regs.dma_trigger),
+            self.dma_engine.direction.eq(self.bsa_regs.dma_direction),
+            self.dma_engine.no_snoop.eq(self.bsa_regs.dma_no_snoop),
+            self.dma_engine.addr_type.eq(self.bsa_regs.dma_addr_type),
+            self.dma_engine.bus_addr.eq(self.bsa_regs.dma_bus_addr),
+            self.dma_engine.length.eq(self.bsa_regs.dma_len),
+            self.dma_engine.offset.eq(self.bsa_regs.dma_offset),
+        ]
+
+        # Connect DMA engine status signals to BSA registers
+        self.comb += [
+            self.bsa_regs.dma_busy.eq(self.dma_engine.busy),
+            self.bsa_regs.dma_status.eq(self.dma_engine.status),
+            self.bsa_regs.dma_status_we.eq(self.dma_engine.status_we),
+        ]
+
+        # Connect DMA engine to master port for TLP requests
+        dma_port = self.pcie_endpoint.crossbar.get_master_port()
+        self.comb += [
+            self.dma_engine.source.connect(dma_port.sink),
+            dma_port.source.connect(self.dma_engine.sink),
+        ]
 
         # Legacy Test CSRs (at higher address for backward compatibility)
         self.test_csrs = TestCSRs()

@@ -27,42 +27,52 @@ from .bar_routing import (
 class LitePCIeMultiBAREndpoint(LiteXModule):
     """
     PCIe Endpoint with multi-BAR routing.
-    
+
     Routes incoming requests to per-BAR crossbars based on the bar_hit field
     from the PHY. Each BAR gets its own crossbar for independent frontend
     attachment.
-    
+
     Parameters
     ----------
     phy : S7PCIEPHY (or compatible)
         PCIe PHY instance.
-        
+
     endianness : str
         Endianness for TLP processing ("big" or "little").
-        
+
     address_width : int
         Address width for crossbar ports.
-        
+
     max_pending_requests : int
         Maximum outstanding requests per crossbar.
-        
+
     bar_enables : dict
         Which BARs to create crossbars for. Example: {0: True, 1: True, 2: False}
         BARs not in dict or set to False get stub handlers.
+
+    bar_handlers : dict
+        Optional custom handlers for specific BARs. Example: {1: my_handler}
+        Handlers must have req_sink (Endpoint) and cpl_source (Endpoint) attributes.
+        If a handler is provided for a BAR, it takes precedence over bar_enables.
     """
-    
-    def __init__(self, phy, 
-                 endianness="big", 
-                 address_width=32, 
+
+    def __init__(self, phy,
+                 endianness="big",
+                 address_width=32,
                  max_pending_requests=4,
-                 bar_enables=None):
+                 bar_enables=None,
+                 bar_handlers=None):
         
         self.phy        = phy
         self.data_width = phy.data_width
-        
+
         # Default: only BAR0 enabled
         if bar_enables is None:
             bar_enables = {0: True}
+
+        # Default: no custom handlers
+        if bar_handlers is None:
+            bar_handlers = {}
         
         # =====================================================================
         # TLP Depacketizer / Packetizer
@@ -105,7 +115,24 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         bar_master_sinks = {}
         
         for bar_num in range(6):
-            if bar_enables.get(bar_num, False):
+            if bar_num in bar_handlers:
+                # Use custom handler for this BAR
+                handler = bar_handlers[bar_num]
+                setattr(self, f"bar{bar_num}_handler", handler)
+                self.bar_handlers[bar_num] = handler
+
+                bar_req_sinks[bar_num]   = handler.req_sink
+                bar_cpl_sources[bar_num] = handler.cpl_source
+                # Custom handlers don't have master ports (no DMA initiation)
+                # Use dummy signals for master arbiter compatibility
+                dummy_req = stream.Endpoint(request_layout(phy.data_width))
+                dummy_cpl = stream.Endpoint(completion_layout(phy.data_width))
+                self.comb += dummy_req.valid.eq(0)
+                self.comb += dummy_cpl.ready.eq(1)
+                bar_master_sources[bar_num] = dummy_req
+                bar_master_sinks[bar_num]   = dummy_cpl
+
+            elif bar_enables.get(bar_num, False):
                 # Create full crossbar for this BAR
                 crossbar = LitePCIeCrossbar(
                     data_width           = phy.data_width,
@@ -115,12 +142,12 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
                 )
                 setattr(self, f"bar{bar_num}_crossbar", crossbar)
                 self.crossbars[bar_num] = crossbar
-                
+
                 bar_req_sinks[bar_num]      = crossbar.phy_slave.sink
                 bar_cpl_sources[bar_num]    = crossbar.phy_slave.source
                 bar_master_sources[bar_num] = crossbar.phy_master.source
                 bar_master_sinks[bar_num]   = crossbar.phy_master.sink
-                
+
             else:
                 # Create stub handler
                 stub = LitePCIeStubBARHandler(
@@ -130,7 +157,7 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
                 )
                 setattr(self, f"bar{bar_num}_stub", stub)
                 self.bar_handlers[bar_num] = stub
-                
+
                 bar_req_sinks[bar_num]      = stub.req_sink
                 bar_cpl_sources[bar_num]    = stub.cpl_source
                 bar_master_sources[bar_num] = stub.req_source
