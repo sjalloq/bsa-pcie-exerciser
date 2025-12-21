@@ -55,7 +55,7 @@ class DMATestbench(LiteXModule):
         # DMA Buffer (shared between handler and engine)
         # =====================================================================
 
-        self.buffer = BSADMABuffer(size=buffer_size, data_width=data_width)
+        self.buffer = BSADMABuffer(size=buffer_size, data_width=data_width, simulation=True)
 
         # =====================================================================
         # BAR1 Handler (host access to buffer)

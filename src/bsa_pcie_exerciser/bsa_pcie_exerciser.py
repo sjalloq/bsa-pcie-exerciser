@@ -42,6 +42,8 @@ from bsa_pcie_exerciser.dma import (
     BSADMAEngine,
 )
 
+from bsa_pcie_exerciser.monitor import TransactionMonitor
+
 # =============================================================================
 # Clock Reset Generator
 # =============================================================================
@@ -241,6 +243,46 @@ class BSAExerciserSoC(SoCMini):
         self.comb += [
             self.dma_engine.source.connect(dma_port.source),  # request -> request
             dma_port.sink.connect(self.dma_engine.sink),      # completion -> completion
+        ]
+
+        # Transaction Monitor -------------------------------------------------------
+        self.txn_monitor = TransactionMonitor(
+            data_width = self.pcie_phy.data_width,
+            fifo_depth = 32,  # BSA spec maximum
+        )
+
+        # Tap into the request stream from depacketizer
+        req_source = self.pcie_endpoint.req_source
+        self.comb += [
+            self.txn_monitor.tap_valid.eq(req_source.valid & req_source.ready),
+            self.txn_monitor.tap_first.eq(req_source.first),
+            self.txn_monitor.tap_last.eq(req_source.last),
+            self.txn_monitor.tap_we.eq(req_source.we),
+            self.txn_monitor.tap_adr.eq(req_source.adr),
+            self.txn_monitor.tap_len.eq(req_source.len),
+            self.txn_monitor.tap_dat.eq(req_source.dat),
+            self.txn_monitor.tap_req_id.eq(req_source.req_id),
+            self.txn_monitor.tap_tag.eq(req_source.tag),
+            self.txn_monitor.tap_bar_hit.eq(req_source.bar_hit),
+        ]
+
+        # Conditionally connect optional fields (attr, at, first_be, last_be)
+        if hasattr(req_source, 'first_be'):
+            self.comb += self.txn_monitor.tap_first_be.eq(req_source.first_be)
+        if hasattr(req_source, 'last_be'):
+            self.comb += self.txn_monitor.tap_last_be.eq(req_source.last_be)
+        if hasattr(req_source, 'attr'):
+            self.comb += self.txn_monitor.tap_attr.eq(req_source.attr)
+        if hasattr(req_source, 'at'):
+            self.comb += self.txn_monitor.tap_at.eq(req_source.at)
+
+        # Connect monitor control/status to BSA registers
+        self.comb += [
+            self.txn_monitor.enable.eq(self.bsa_regs.txn_enable),
+            self.txn_monitor.clear.eq(self.bsa_regs.txn_clear),
+            self.bsa_regs.txn_fifo_data.eq(self.txn_monitor.fifo_data),
+            self.bsa_regs.txn_fifo_valid.eq(~self.txn_monitor.fifo_empty),
+            self.txn_monitor.fifo_read.eq(self.bsa_regs.txn_fifo_read),
         ]
 
         # MSI (placeholder - Phase 3 will add full MSI-X) -------------------------

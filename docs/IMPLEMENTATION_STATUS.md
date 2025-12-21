@@ -15,7 +15,7 @@ This document tracks the implementation status of the ARM BSA PCIe Exerciser.
 | BAR0 Registers | ✅ Complete | Full BSA spec register map via Wishbone |
 | MSI-X (2048 vectors) | ✅ Complete | Table in BAR2, PBA in BAR5 |
 | DMA Engine | ✅ Complete | Register-triggered, 16KB buffer in BAR1 |
-| Transaction Monitor | ❌ Not Started | TXN_TRACE FIFO for e022 test |
+| Transaction Monitor | ✅ Complete | TXN_TRACE FIFO, 32 entry capture buffer |
 | Legacy Interrupt | ❌ Not Started | INTx assertion via INTXCTL |
 | ATS Engine | ❌ Not Started | Translation requests |
 | PASID Support | ❌ Not Started | TLP prefix generation |
@@ -93,19 +93,34 @@ See `docs/REGISTER_MAP.md` for detailed register definitions.
 - Buffer offset from DMA_OFFSET register
 - Status reported in DMASTATUS register
 
+### Transaction Monitor
+
+**Location:** `src/bsa_pcie_exerciser/monitor/`
+
+- `TransactionMonitor` - Captures inbound PCIe requests to FIFO
+- Taps depacketizer request stream (non-invasive)
+- 32-entry circular buffer, 160 bits per transaction (BSA spec max)
+- 5 x 32-bit word read sequence via TXN_TRACE register
+
+**Capture Layout (Word 0 - Attributes):**
+- [0]: we (1=write, 0=read)
+- [3:1]: bar_hit[2:0]
+- [13:4]: len[9:0]
+- [17:14]: first_be[3:0]
+- [21:18]: last_be[3:0]
+- [23:22]: attr[1:0]
+- [25:24]: at[1:0]
+
+**Words 1-4:** ADDRESS[63:0], DATA[63:0]
+
+**Control:**
+- TXN_CTRL[0]: Enable capture
+- TXN_CTRL[1]: Clear FIFO (auto-clears)
+- TXN_TRACE: Returns 0xFFFFFFFF when empty
+
 ---
 
 ## Remaining Work
-
-### Phase 3: Transaction Monitor (HIGH PRIORITY)
-
-**Critical for BSA e022 test** - Verifies PE write sizes arrive correctly.
-
-Required:
-- [ ] TXN_TRACE FIFO (16+ entries, 160 bits each)
-- [ ] Capture inbound writes with byte enables (`first_be`/`last_be`)
-- [ ] TXN_CTRL register for enable/clear
-- [ ] 5-word read sequence for each captured transaction
 
 ### Phase 4: Legacy Interrupt
 

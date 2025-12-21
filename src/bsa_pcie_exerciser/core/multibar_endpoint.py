@@ -238,9 +238,17 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         # =====================================================================
         # Convenience: expose BAR0 crossbar as 'crossbar' for compatibility
         # =====================================================================
-        
+
         if 0 in self.crossbars:
             self.crossbar = self.crossbars[0]
+
+        # =====================================================================
+        # Expose request source for transaction monitoring
+        # =====================================================================
+
+        # The req_source from depacketizer can be tapped for transaction
+        # monitoring. This is exposed so the top-level can wire a monitor.
+        self.req_source = self.depacketizer.req_source
 
 
 class LitePCIeBAREndpoint(LiteXModule):

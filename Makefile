@@ -21,3 +21,6 @@ build: logs ## Build the LiteX top level
 
 repopack: ## Package repo for upload to LLM
 	repopack -i .venv,.git,build,logs,docs,external,.vscode,*.txt -o $(BSA_EXERCISER).txt
+
+wc: ## Count non-empty, non-comment lines of Migen code
+	@find src -name "*.py" -exec cat {} + | grep -vE '^\s*(#|$$)' | wc -l
