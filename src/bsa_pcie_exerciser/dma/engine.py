@@ -61,7 +61,6 @@ class BSADMAEngine(LiteXModule):
         assert data_width >= 64, "Minimum 64-bit data width"
 
         self.phy = phy
-        self.buffer = buffer
         self.data_width = data_width
         self.max_request_size = max_request_size
 
