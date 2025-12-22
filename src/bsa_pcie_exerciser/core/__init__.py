@@ -20,3 +20,4 @@ from .bsa_registers import (
     EXERCISER_DEVICE_ID,
     EXERCISER_COMBINED_ID,
 )
+from .intx_controller import INTxController

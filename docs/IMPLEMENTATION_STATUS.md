@@ -16,7 +16,7 @@ This document tracks the implementation status of the ARM BSA PCIe Exerciser.
 | MSI-X (2048 vectors) | ✅ Complete | Table in BAR2, PBA in BAR5 |
 | DMA Engine | ✅ Complete | Register-triggered, 16KB buffer in BAR1 |
 | Transaction Monitor | ✅ Complete | TXN_TRACE FIFO, 32 entry capture buffer |
-| Legacy Interrupt | ❌ Not Started | INTx assertion via INTXCTL |
+| Legacy Interrupt | ✅ Complete | INTx assertion via INTXCTL |
 | ATS Engine | ❌ Not Started | Translation requests |
 | PASID Support | ❌ Not Started | TLP prefix generation |
 | RID Override | ❌ Not Started | Requester ID spoofing |
@@ -120,13 +120,22 @@ See `docs/REGISTER_MAP.md` for detailed register definitions.
 
 ---
 
+### Legacy Interrupt
+
+**Location:** `src/bsa_pcie_exerciser/core/intx_controller.py`
+
+- `INTxController` - FSM for Xilinx PCIe INTx handshake
+- Patched S7PCIEPHY with `intx_req`, `intx_assert`, `intx_rdy` signals
+- Assert/deassert via INTXCTL[0] register
+
+**Protocol:**
+- Monitors INTXCTL[0] for state changes
+- Pulses `cfg_interrupt` with desired `cfg_interrupt_assert` value
+- Waits for `cfg_interrupt_rdy` acknowledgement
+
+---
+
 ## Remaining Work
-
-### Phase 4: Legacy Interrupt
-
-Required:
-- [ ] Wire `bsa_regs.intx_assert` to PHY INTx signals
-- [ ] Test assertion/deassertion via INTXCTL register
 
 ### Phase 5: Advanced Features (Lower Priority)
 
@@ -157,6 +166,7 @@ Uses forked LitePCIe with `feature/tlp-attributes` branch:
 - `bar_hit` extraction from PHY
 - `first_be`/`last_be` propagation
 - `attr` field in request/packetizer
+- `intx_req`/`intx_assert`/`intx_rdy` for legacy interrupts
 
 Repository: https://github.com/sjalloq/litepcie/tree/feature/tlp-attributes
 

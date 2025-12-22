@@ -21,7 +21,7 @@ from litex.soc.interconnect import stream
 from litepcie.common import *
 
 
-class LitePCIeMSIXTable(LiteXModule):
+class LitePCIeMSIXTable(Module):
     """
     MSI-X Table BAR handler.
 

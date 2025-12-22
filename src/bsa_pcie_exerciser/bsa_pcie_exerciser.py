@@ -20,7 +20,6 @@ from litex.soc.integration.soc_core import SoCMini
 from litex.soc.integration.builder import Builder
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
-from litepcie.core import LitePCIeMSI
 from litepcie.core.crossbar import LitePCIeCrossbar
 from litepcie.core.endpoint import LitePCIeEndpoint
 from litepcie.tlp.depacketizer import LitePCIeTLPDepacketizer
@@ -34,6 +33,7 @@ from bsa_pcie_exerciser.core import (
     LitePCIeStubBARHandler,
     LitePCIeMultiBAREndpoint,
     BSARegisters,
+    INTxController,
 )
 
 from bsa_pcie_exerciser.dma import (
@@ -43,6 +43,12 @@ from bsa_pcie_exerciser.dma import (
 )
 
 from bsa_pcie_exerciser.monitor import TransactionMonitor
+
+from bsa_pcie_exerciser.msix import (
+    LitePCIeMSIXTable,
+    LitePCIeMSIXPBA,
+    LitePCIeMSIXController,
+)
 
 # =============================================================================
 # Clock Reset Generator
@@ -159,6 +165,10 @@ class BSAExerciserSoC(SoCMini):
             "MSIx_Table_Offset" : "0",
             "MSIx_PBA_BIR"      : "BAR_5",
             "MSIx_PBA_Offset"   : "0",
+
+            # Legacy Interrupts
+            "Legacy_Interrupt": "INTA",
+            "IntX_Generation" : True,
         })
 
         # LTSSM Tracer for link debugging
@@ -183,12 +193,30 @@ class BSAExerciserSoC(SoCMini):
             data_width = self.pcie_phy.data_width,
         )
 
+        # MSI-X Table and PBA Handlers --------------------------------------------
+        # Create before endpoint so we can pass handlers to it
+        self.msix_table = LitePCIeMSIXTable(
+            phy        = self.pcie_phy,
+            data_width = self.pcie_phy.data_width,
+            n_vectors  = 2048,
+        )
+
+        self.msix_pba = LitePCIeMSIXPBA(
+            phy        = self.pcie_phy,
+            data_width = self.pcie_phy.data_width,
+            n_vectors  = 2048,
+        )
+
         # PCIe Endpoint -----------------------------------------------------------
         self.pcie_endpoint = LitePCIeMultiBAREndpoint(self.pcie_phy,
             endianness           = "big",
             max_pending_requests = 4,
             bar_enables  = {0: True, 1: False, 2: False, 3: False, 4: False, 5: False},
-            bar_handlers = {1: self.dma_handler},  # BAR1 handled by DMA buffer handler
+            bar_handlers = {
+                1: self.dma_handler,   # BAR1: DMA buffer
+                2: self.msix_table,    # BAR2: MSI-X Table
+                5: self.msix_pba,      # BAR5: MSI-X PBA
+            },
         )
 
         # BSA Registers -----------------------------------------------------------
@@ -245,6 +273,20 @@ class BSAExerciserSoC(SoCMini):
             dma_port.sink.connect(self.dma_engine.sink),      # completion -> completion
         ]
 
+        # MSI-X Controller ----------------------------------------------------------
+        self.msix_controller = LitePCIeMSIXController(
+            endpoint = self.pcie_endpoint,
+            table    = self.msix_table,
+            pba      = self.msix_pba,
+        )
+
+        # Connect MSI-X controller to BSA registers
+        self.comb += [
+            self.msix_controller.sw_vector.eq(self.bsa_regs.msi_vector),
+            self.msix_controller.sw_valid.eq(self.bsa_regs.msi_trigger),
+            self.bsa_regs.msi_busy.eq(~self.msix_controller.fsm.ongoing("IDLE")),
+        ]
+
         # Transaction Monitor -------------------------------------------------------
         self.txn_monitor = TransactionMonitor(
             data_width = self.pcie_phy.data_width,
@@ -285,9 +327,10 @@ class BSAExerciserSoC(SoCMini):
             self.txn_monitor.fifo_read.eq(self.bsa_regs.txn_fifo_read),
         ]
 
-        # MSI (placeholder - Phase 3 will add full MSI-X) -------------------------
-        self.pcie_msi = LitePCIeMSI()
-        self.comb += self.pcie_msi.source.connect(self.pcie_phy.msi)
+        # Legacy INTx Controller ---------------------------------------------------
+        self.intx_ctrl = INTxController()
+        self.comb += self.intx_ctrl.source.connect(self.pcie_phy.intx)
+        self.comb += self.intx_ctrl.intx_assert.eq(self.bsa_regs.intx_assert)
 
         # Vivado ------------------------------------------------------------------
         platform.toolchain.pre_synthesis_commands.append("set_property XPM_LIBRARIES XPM_MEMORY [current_project]")
