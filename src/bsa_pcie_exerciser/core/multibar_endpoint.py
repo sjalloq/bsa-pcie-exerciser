@@ -54,6 +54,21 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         Optional custom handlers for specific BARs. Example: {1: my_handler}
         Handlers must have req_sink (Endpoint) and cpl_source (Endpoint) attributes.
         If a handler is provided for a BAR, it takes precedence over bar_enables.
+
+    tx_filter : LiteXModule, optional
+        Optional TX path filter module (e.g., PASID prefix injector).
+        Must have sink (input) and source (output) stream endpoints with phy_layout.
+        If provided, inserted between packetizer and PHY: packetizer → tx_filter → PHY.
+
+    with_ats_inv : bool
+        Enable ATS Invalidation Message handling. When True, the depacketizer
+        will parse ATS Invalidation Messages and expose ats_inv_source.
+
+    raw_tx_sources : list, optional
+        List of additional raw TX sources (phy_layout endpoints) to be arbitrated
+        with the main TX path. These bypass the packetizer and go directly to the
+        PHY after the tx_filter (if any). Useful for Message TLPs like ATS
+        Invalidation Completions that don't need PASID prefix injection.
     """
 
     def __init__(self, phy,
@@ -61,7 +76,10 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
                  address_width=32,
                  max_pending_requests=4,
                  bar_enables=None,
-                 bar_handlers=None):
+                 bar_handlers=None,
+                 tx_filter=None,
+                 with_ats_inv=False,
+                 raw_tx_sources=None):
         
         self.phy        = phy
         self.data_width = phy.data_width
@@ -77,13 +95,22 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         # =====================================================================
         # TLP Depacketizer / Packetizer
         # =====================================================================
-        
+
+        # Build capabilities list
+        depack_capabilities = ["REQUEST", "COMPLETION"]
+        if with_ats_inv:
+            depack_capabilities.append("ATS_INV")
+
         self.depacketizer = LitePCIeTLPDepacketizer(
             data_width   = phy.data_width,
             endianness   = endianness,
             address_mask = phy.bar0_mask,
-            capabilities = ["REQUEST", "COMPLETION"],
+            capabilities = depack_capabilities,
         )
+
+        # Expose ATS Invalidation source if enabled
+        if with_ats_inv:
+            self.ats_inv_source = self.depacketizer.ats_inv_source
         
         self.packetizer = LitePCIeTLPPacketizer(
             data_width    = phy.data_width,
@@ -93,10 +120,55 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         )
         
         # Connect PHY
-        self.comb += [
-            phy.source.connect(self.depacketizer.sink),
-            self.packetizer.source.connect(phy.sink),
-        ]
+        # RX path: PHY → depacketizer
+        self.comb += phy.source.connect(self.depacketizer.sink)
+
+        # TX path: packetizer → [tx_filter] → [arbiter] → PHY
+        # Determine the main TX source (after optional filtering)
+        if tx_filter is not None:
+            self.tx_filter = tx_filter
+            self.comb += self.packetizer.source.connect(tx_filter.sink)
+            main_tx_source = tx_filter.source
+        else:
+            main_tx_source = self.packetizer.source
+
+        # If we have raw TX sources (e.g., Message TLPs), arbitrate them with main TX
+        if raw_tx_sources:
+            # Simple 2-source priority arbiter: raw sources have priority (they're rare)
+            # Main TX path has lower priority, raw sources (like Message TLPs) take over
+            # when they have data. Respects packet boundaries.
+
+            raw_src = raw_tx_sources[0]  # Currently only support one raw source
+
+            # Track if we're mid-packet on the main TX path
+            main_in_packet = Signal()
+            self.sync += If(main_tx_source.valid & phy.sink.ready,
+                If(main_tx_source.first,
+                    main_in_packet.eq(1),
+                ),
+                If(main_tx_source.last,
+                    main_in_packet.eq(0),
+                ),
+            )
+
+            # Grant raw source when it has data AND we're not mid-main-packet
+            grant_raw = Signal()
+            self.comb += grant_raw.eq(raw_src.valid & ~main_in_packet)
+
+            # Mux the outputs
+            self.comb += [
+                phy.sink.valid.eq(Mux(grant_raw, raw_src.valid, main_tx_source.valid)),
+                phy.sink.first.eq(Mux(grant_raw, raw_src.first, main_tx_source.first)),
+                phy.sink.last.eq(Mux(grant_raw, raw_src.last, main_tx_source.last)),
+                phy.sink.dat.eq(Mux(grant_raw, raw_src.dat, main_tx_source.dat)),
+                phy.sink.be.eq(Mux(grant_raw, raw_src.be, main_tx_source.be)),
+                # Ready back to sources
+                main_tx_source.ready.eq(~grant_raw & phy.sink.ready),
+                raw_src.ready.eq(grant_raw & phy.sink.ready),
+            ]
+        else:
+            # No additional sources, direct connection
+            self.comb += main_tx_source.connect(phy.sink)
         
         # =====================================================================
         # Per-BAR Crossbars and Handlers

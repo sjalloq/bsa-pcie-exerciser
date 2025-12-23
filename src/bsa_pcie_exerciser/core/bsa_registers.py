@@ -109,6 +109,27 @@ class BSARegisters(LiteXModule):
         self.dma_status    = Signal(2)
         self.dma_status_we = Signal()
 
+        # ATS interface (control outputs)
+        self.ats_trigger    = Signal()       # Pulse to trigger ATS request
+        self.ats_privileged = Signal()       # Privileged access mode
+        self.ats_no_write   = Signal()       # Read-only permission requested
+        self.ats_pasid_en   = Signal()       # Include PASID in ATS request
+        self.ats_exec_req   = Signal()       # Execute permission requested
+        self.ats_clear_atc  = Signal()       # Clear ATC (write-1-to-clear)
+
+        # ATS interface (status inputs from ATS engine)
+        self.ats_in_flight   = Signal()      # ATS request in progress
+        self.ats_success     = Signal()      # Translation successful
+        self.ats_cacheable   = Signal()      # Translation result cacheable
+        self.ats_invalidated = Signal()      # ATC was invalidated
+
+        # ATS result interface (written by ATS engine)
+        self.ats_addr_lo_we    = Signal()    # Write enable for result registers
+        self.ats_addr_lo_in    = Signal(32)
+        self.ats_addr_hi_in    = Signal(32)
+        self.ats_range_size_in = Signal(32)
+        self.ats_perm_in       = Signal(32)
+
         # RID override interface
         self.rid_override_valid = Signal()
         self.rid_override_value = Signal(16)
@@ -240,6 +261,54 @@ class BSARegisters(LiteXModule):
             # Clear on write to bit 2
             If(self.bus.cyc & self.bus.stb & self.bus.we & (reg_addr == REG_DMASTATUS) & self.bus.dat_w[2],
                 self.dmastatus[:2].eq(0),
+            ),
+        ]
+
+        # ATSCTL: [0]=trigger, [1]=privileged, [2]=no_write, [3]=pasid_en,
+        #         [4]=exec_req, [5]=clear_atc, [6]=in_flight(RO), [7]=success(RO),
+        #         [8]=cacheable(RO), [9]=invalidated(RO)
+        self.comb += [
+            self.ats_privileged.eq(self.atsctl[1]),
+            self.ats_no_write.eq(self.atsctl[2]),
+            self.ats_pasid_en.eq(self.atsctl[3]),
+            self.ats_exec_req.eq(self.atsctl[4]),
+        ]
+
+        # ATS trigger: edge detect on bit 0, only when not in flight
+        ats_trigger_prev = Signal()
+        self.sync += ats_trigger_prev.eq(self.atsctl[0])
+        self.comb += self.ats_trigger.eq(self.atsctl[0] & ~ats_trigger_prev & ~self.ats_in_flight)
+
+        # Auto-clear ATS trigger after started
+        self.sync += [
+            If(self.ats_trigger,
+                self.atsctl[0].eq(0),
+            ),
+        ]
+
+        # ATS clear_atc: write-1-to-clear
+        self.comb += self.ats_clear_atc.eq(self.atsctl[5])
+        self.sync += [
+            If(self.atsctl[5],
+                self.atsctl[5].eq(0),
+            ),
+        ]
+
+        # Update ATSCTL read-only status bits from ATS engine
+        self.sync += [
+            self.atsctl[6].eq(self.ats_in_flight),
+            self.atsctl[7].eq(self.ats_success),
+            self.atsctl[8].eq(self.ats_cacheable),
+            self.atsctl[9].eq(self.ats_invalidated),
+        ]
+
+        # ATS result registers update from ATS engine
+        self.sync += [
+            If(self.ats_addr_lo_we,
+                self.ats_addr_lo.eq(self.ats_addr_lo_in),
+                self.ats_addr_hi.eq(self.ats_addr_hi_in),
+                self.ats_range_size.eq(self.ats_range_size_in),
+                self.ats_perm.eq(self.ats_perm_in),
             ),
         ]
 

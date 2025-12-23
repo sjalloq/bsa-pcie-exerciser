@@ -107,9 +107,11 @@ class LitePCIeBARDispatcher(LiteXModule):
                 sink.channel.eq(source.channel),
                 sink.user_id.eq(source.user_id),
                 sink.bar_hit.eq(source.bar_hit),
+                sink.first_be.eq(source.first_be),
+                sink.last_be.eq(source.last_be),
                 source_ready.eq(sink.ready),
             ]
-            
+
             # Include attr/at if present in layout
             if hasattr(source, 'attr'):
                 case_stmts.append(sink.attr.eq(source.attr))

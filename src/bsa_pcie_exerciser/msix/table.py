@@ -110,7 +110,9 @@ class LitePCIeMSIXTable(Module):
         # PCIe Access FSM
         # =====================================================================
 
-        self.fsm = fsm = FSM(reset_state="IDLE")
+        # NOTE: Must use self.submodules.fsm (not self.fsm) because this class
+        # inherits from Module, not LiteXModule. LiteXModule auto-registers FSM.
+        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
 
         # Latched request info
         req_adr    = Signal(32)

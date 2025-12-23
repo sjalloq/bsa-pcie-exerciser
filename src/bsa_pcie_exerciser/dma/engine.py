@@ -76,6 +76,12 @@ class BSADMAEngine(LiteXModule):
         self.length      = Signal(32)        # Transfer length in bytes
         self.offset      = Signal(32)        # Offset within internal buffer
 
+        # PASID TLP Prefix control
+        self.pasid_en    = Signal()          # Enable PASID TLP prefix
+        self.pasid_val   = Signal(20)        # 20-bit PASID value
+        self.privileged  = Signal()          # Privileged Mode Requested (PMR)
+        self.instruction = Signal()          # Instruction access (maps to Execute)
+
         # =====================================================================
         # Status Interface (to BSARegisters)
         # =====================================================================
@@ -83,6 +89,26 @@ class BSADMAEngine(LiteXModule):
         self.busy        = Signal()          # DMA in progress
         self.status      = Signal(2)         # Status: 0=ok, 1=error, 2=timeout
         self.status_we   = Signal()          # Pulse when status is valid
+
+        # =====================================================================
+        # PASID Output Interface (to Prefix Injector)
+        # =====================================================================
+        # These are latched values, stable during DMA operation
+        self.pasid_out_en   = Signal()       # Latched PASID enable
+        self.pasid_out_val  = Signal(20)     # Latched PASID value
+        self.pasid_out_priv = Signal()       # Latched privileged mode
+        self.pasid_out_exec = Signal()       # Latched execute
+
+        # =====================================================================
+        # ATC Lookup Interface (from ATC)
+        # =====================================================================
+        # Used when use_atc=1 to substitute translated address for bus_addr
+        # The top-level drives ATC lookup inputs from lookup_addr and PASID signals,
+        # then connects the ATC lookup results here.
+        self.lookup_addr     = Signal(64)    # Address for ATC lookup (output to ATC)
+        self.atc_hit         = Signal()      # ATC lookup hit (includes PASID match)
+        self.atc_output_addr = Signal(64)    # ATC translated (physical) address
+        self.use_atc         = Signal()      # Enable ATC lookup for this transfer
 
         # =====================================================================
         # Master Port Interface (TLP generation)
@@ -103,6 +129,12 @@ class BSADMAEngine(LiteXModule):
         current_ns     = Signal()            # Latched no-snoop
         current_at     = Signal(2)           # Latched address type
 
+        # Latched PASID parameters
+        current_pasid_en  = Signal()         # Latched PASID enable
+        current_pasid_val = Signal(20)       # Latched PASID value
+        current_priv      = Signal()         # Latched privileged mode
+        current_exec      = Signal()         # Latched execute (instruction)
+
         # Per-TLP tracking
         tlp_len_bytes  = Signal(10)          # Bytes in current TLP (max 512)
         tlp_len_dwords = Signal(8)           # DWORDs in current TLP
@@ -120,6 +152,40 @@ class BSADMAEngine(LiteXModule):
 
         # Calculate bytes per beat
         bytes_per_beat = data_width // 8
+
+        # Connect PASID output signals to latched values
+        self.comb += [
+            self.pasid_out_en.eq(current_pasid_en),
+            self.pasid_out_val.eq(current_pasid_val),
+            self.pasid_out_priv.eq(current_priv),
+            self.pasid_out_exec.eq(current_exec),
+        ]
+
+        # =====================================================================
+        # ATC Lookup Logic
+        # =====================================================================
+        # Drive lookup_addr for top-level to use with ATC lookup interface.
+        # The top-level connects this to atc.lookup_addr along with PASID signals,
+        # and returns the hit result and translated address.
+        # Note: AT field stays under software control for testing SMMU error paths
+
+        addr_in_atc = Signal()
+
+        self.comb += [
+            # Drive lookup address for ATC (top-level connects to atc.lookup_addr)
+            self.lookup_addr.eq(current_addr),
+
+            # ATC hit comes from the ATC's PASID-aware lookup (via top-level wiring)
+            # Only consider hit when use_atc is enabled
+            addr_in_atc.eq(self.use_atc & self.atc_hit),
+        ]
+
+        # Effective address for TLP generation (uses translation when ATC hit)
+        # The translated address comes from ATC's lookup_output (via atc_output_addr)
+        effective_addr = Signal(64)
+        self.comb += effective_addr.eq(
+            Mux(addr_in_atc, self.atc_output_addr, current_addr)
+        )
 
         # =====================================================================
         # FSM
@@ -143,6 +209,11 @@ class BSADMAEngine(LiteXModule):
                 NextValue(current_ns, self.no_snoop),
                 NextValue(current_at, self.addr_type),
                 NextValue(current_tag, 0),
+                # Latch PASID parameters
+                NextValue(current_pasid_en, self.pasid_en),
+                NextValue(current_pasid_val, self.pasid_val),
+                NextValue(current_priv, self.privileged),
+                NextValue(current_exec, self.instruction),
                 NextState("SETUP"),
             ),
         )
@@ -187,6 +258,11 @@ class BSADMAEngine(LiteXModule):
             source.at.eq(current_at),
             source.first_be.eq(0xF),
             source.last_be.eq(0xF),
+            # PASID TLP Prefix fields
+            source.pasid_en.eq(current_pasid_en),
+            source.pasid_val.eq(current_pasid_val),
+            source.privileged.eq(current_priv),
+            source.execute.eq(current_exec),
         ]
 
         fsm.act("ISSUE_RD",
@@ -196,7 +272,7 @@ class BSADMAEngine(LiteXModule):
             source.first.eq(1),
             source.last.eq(1),
             source.we.eq(0),  # Read request
-            source.adr.eq(current_addr),
+            source.adr.eq(effective_addr),  # Use ATC translation if available
             source.len.eq(tlp_len_dwords),
 
             If(source.ready,
@@ -284,7 +360,7 @@ class BSADMAEngine(LiteXModule):
             source.first.eq(is_first_beat),
             source.last.eq(is_last_beat),
             source.we.eq(1),  # Write request
-            source.adr.eq(current_addr),
+            source.adr.eq(effective_addr),  # Use ATC translation if available
             source.len.eq(tlp_len_dwords),
             source.dat.eq(buffer.a_dat_r),
 
@@ -313,6 +389,8 @@ class BSADMAEngine(LiteXModule):
         # ---------------------------------------------------------------------
         # COMPLETE State: Signal completion
         # ---------------------------------------------------------------------
+        # The PASID injector is self-latching (captures PASID on first beat),
+        # so we can transition to IDLE immediately after signaling status.
 
         fsm.act("COMPLETE",
             self.busy.eq(0),
