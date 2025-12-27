@@ -82,18 +82,18 @@ class _CRG(LiteXModule):
 
 
 # =============================================================================
-# BSA Exerciser SoC - Phase 2 (Multi-BAR)
+# BSA Exerciser SoC
 # =============================================================================
 
 class BSAExerciserSoC(SoCMini):
     """
-    BSA Exerciser SoC with multi-BAR configuration.
+    BSA PCIe Exerciser SoC with multi-BAR configuration.
 
-    Phase 2 Features:
-    - Multi-BAR IP configuration (BAR0, BAR1, BAR2, BAR5)
-    - BAR0 active with CSR access
-    - BAR1/2/5 configured but handlers TBD
-    - Prepared for MSI-X (2048 vectors)
+    BAR Layout:
+    - BAR0: CSR registers (4KB)
+    - BAR1: DMA buffer (16KB)
+    - BAR2: MSI-X table (32KB, 2048 vectors)
+    - BAR5: MSI-X PBA (4KB)
     """
 
     mem_map = {
@@ -114,7 +114,7 @@ class BSAExerciserSoC(SoCMini):
         # SoCMini -----------------------------------------------------------------
         SoCMini.__init__(self, platform,
             clk_freq      = sys_clk_freq,
-            ident         = "BSA PCIe Exerciser Phase 2",
+            ident         = "BSA PCIe Exerciser",
             ident_version = True,
         )
 
@@ -150,14 +150,14 @@ class BSAExerciserSoC(SoCMini):
                 "Bar0_Type"         : "Memory",
                 "Bar0_Prefetchable" : False,
 
-                # BAR1: DMA Buffer (16KB) - for Phase 4
+                # BAR1: DMA Buffer (16KB)
                 "Bar1_Enabled"      : True,
                 "Bar1_Scale"        : "Kilobytes",
                 "Bar1_Size"         : 16,
                 "Bar1_Type"         : "Memory",
                 "Bar1_Prefetchable" : False,
 
-                # BAR2: MSI-X Table (32KB for 2048 vectors) - for Phase 3
+                # BAR2: MSI-X Table (32KB for 2048 vectors)
                 "Bar2_Enabled"      : True,
                 "Bar2_Scale"        : "Kilobytes",
                 "Bar2_Size"         : 32,
@@ -168,7 +168,7 @@ class BSAExerciserSoC(SoCMini):
                 "Bar3_Enabled"      : False,
                 "Bar4_Enabled"      : False,
 
-                # BAR5: MSI-X PBA (4KB) - for Phase 3
+                # BAR5: MSI-X PBA (4KB)
                 "Bar5_Enabled"      : True,
                 "Bar5_Scale"        : "Kilobytes",
                 "Bar5_Size"         : 4,
@@ -199,7 +199,6 @@ class BSAExerciserSoC(SoCMini):
             )
 
         # DMA Buffer and Handler --------------------------------------------------
-        # Create before endpoint so we can pass handler to it
         self.dma_buffer = BSADMABuffer(
             size       = 16*1024,  # 16KB buffer
             data_width = self.pcie_phy.data_width,
@@ -213,7 +212,6 @@ class BSAExerciserSoC(SoCMini):
         )
 
         # MSI-X Table and PBA Handlers --------------------------------------------
-        # Create before endpoint so we can pass handlers to it
         self.msix_table = LitePCIeMSIXTable(
             phy        = self.pcie_phy,
             data_width = self.pcie_phy.data_width,
@@ -496,7 +494,7 @@ class BSAExerciserSoC(SoCMini):
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="BSA PCIe Exerciser Phase 2")
+    parser = argparse.ArgumentParser(description="BSA PCIe Exerciser")
     parser.add_argument("--build",        action="store_true", help="Build bitstream")
     parser.add_argument("--load",         action="store_true", help="Load bitstream via JTAG")
     parser.add_argument("--sys-clk-freq", default=125e6, type=float, help="System clock frequency")

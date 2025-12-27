@@ -1,19 +1,39 @@
-.. bsa-pcie-exerciser documentation master file, created by
-   sphinx-quickstart on Mon Dec 15 23:52:29 2025.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+BSA PCIe Exerciser Documentation
+=================================
 
-bsa-pcie-exerciser documentation
-================================
+The BSA PCIe Exerciser is an FPGA-based PCIe endpoint for ARM Base System
+Architecture (BSA) compliance testing. It enables validation of SMMU/IOMMU,
+cache coherency, address translation, and interrupt handling.
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+Built on the LiteX/LitePCIe framework using Migen for hardware description.
 
+Getting Started
+---------------
+
+* :doc:`bsa/overview` - What the exerciser does and why
+* :doc:`implementation/architecture` - Top-level system design
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: BSA Requirements:
+
+   bsa/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Implementation:
+
+   implementation/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Hardware:
+
+   platforms/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Background:
 
    pcie/index
    litepcie/index

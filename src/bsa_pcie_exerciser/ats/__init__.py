@@ -4,7 +4,7 @@
 # Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# Address Translation Services support (Phase 5).
+# Address Translation Services (ATS) support.
 #
 
 from bsa_pcie_exerciser.ats.engine import ATSEngine

@@ -35,9 +35,9 @@ class PASIDPrefixInjector(LiteXModule):
     Stream-Based Design:
         PASID signals travel with the TLP data through phy_layout fields
         (pasid_en, pasid_val, privileged, execute). No external signals needed.
-        When the first beat arrives, we capture these fields and buffer the
-        beat. In the next cycle (DECIDE state), we use the captured values to
-        decide whether to add a prefix. This eliminates timing races entirely.
+        On the first beat, these fields are captured and the beat is buffered.
+        In the next cycle (DECIDE state), the captured values determine whether
+        to add a prefix. This eliminates timing races entirely.
 
     Attributes
     ----------
@@ -71,15 +71,15 @@ class PASIDPrefixInjector(LiteXModule):
         # =====================================================================
         # Self-Latching: Capture PASID signals on first beat
         # =====================================================================
-        # When we see the first beat of a TLP, we capture the PASID signals
-        # from the stream and buffer the beat. In the next cycle (DECIDE state),
-        # we use the captured values to decide whether to add a prefix.
+        # On the first beat of a TLP, the PASID signals are captured from the
+        # stream and the beat is buffered. In the next cycle (DECIDE state),
+        # the captured values determine whether to add a prefix.
 
         # Captured PASID signals (sampled on first beat)
         captured_pasid_en = Signal()
         captured_prefix   = Signal(32)
 
-        # Buffered first beat (held while we decide)
+        # Buffered first beat (held during DECIDE state)
         buffered_first_dat  = Signal(64, reset_less=True)
         buffered_first_be   = Signal(8, reset_less=True)
         buffered_first_last = Signal()
@@ -183,7 +183,7 @@ class PASIDPrefixInjector(LiteXModule):
                 NextValue(buffered_be, sink.be[4:8]),
 
                 If(sink.last,
-                    # Check if we need to flush the buffered DWORD
+                    # Check if the buffered DWORD needs flushing
                     If(sink.be[4:8] != 0,
                         # Upper DWORD has valid data, need flush beat
                         NextState("FLUSH"),

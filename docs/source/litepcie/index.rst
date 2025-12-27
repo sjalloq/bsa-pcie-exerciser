@@ -8,3 +8,4 @@ Documentation for LitePCIe modifications required for the BSA PCIe Exerciser.
 
    architecture
    modifications
+   pcie_byteswap_architecture

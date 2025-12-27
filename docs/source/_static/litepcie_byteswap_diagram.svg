@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 750">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333"/>
+    </marker>
+    <marker id="arrowhead-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1000" height="750" fill="#fafafa"/>
+  
+  <!-- Title -->
+  <text x="500" y="35" font-family="Arial, sans-serif" font-size="24" font-weight="bold" text-anchor="middle" fill="#1e293b">LitePCIe / Xilinx PCIe Byte-Swap Architecture</text>
+  <text x="500" y="58" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#64748b">(Why everything looks backwards until it isn't)</text>
+
+  <!-- ============== TX PATH (Top) ============== -->
+  <text x="50" y="100" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#2563eb">TX Path (Device → Host)</text>
+  
+  <!-- LitePCIe Internal Box -->
+  <rect x="50" y="120" width="180" height="100" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="140" y="145" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#1e40af">LitePCIe Internal</text>
+  <text x="140" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#1e40af">Native/Little-Endian</text>
+  <text x="140" y="190" font-family="monospace" font-size="10" text-anchor="middle" fill="#1e40af">DW0: 0xDDCCBBAA</text>
+  <text x="140" y="205" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#64748b">(fmt at bits [7:5])</text>
+
+  <!-- Arrow 1 -->
+  <line x1="230" y1="170" x2="280" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrowhead-blue)"/>
+  <text x="255" y="160" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#2563eb">swap</text>
+
+  <!-- PHY Interface Box -->
+  <rect x="290" y="120" width="180" height="100" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="380" y="145" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#92400e">PHY Interface</text>
+  <text x="380" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#92400e">Big-Endian DWORDs</text>
+  <text x="380" y="190" font-family="monospace" font-size="10" text-anchor="middle" fill="#92400e">DW0: 0xAABBCCDD</text>
+  <text x="380" y="205" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#64748b">(fmt at bits [31:29])</text>
+
+  <!-- Testbench callout -->
+  <rect x="295" y="225" width="170" height="30" rx="4" fill="#fecaca" stroke="#dc2626" stroke-width="2" stroke-dasharray="4,2"/>
+  <text x="380" y="245" font-family="Arial, sans-serif" font-size="11" font-weight="bold" text-anchor="middle" fill="#dc2626">⚠ TESTBENCH HERE ⚠</text>
+
+  <!-- Arrow 2 -->
+  <line x1="470" y1="170" x2="520" y2="170" stroke="#d97706" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="495" y="160" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#d97706">swap</text>
+
+  <!-- Xilinx IP Box -->
+  <rect x="530" y="120" width="180" height="100" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+  <text x="620" y="145" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#991b1b">Xilinx PCIe IP</text>
+  <text x="620" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#991b1b">Internal Format</text>
+  <text x="620" y="190" font-family="monospace" font-size="10" text-anchor="middle" fill="#991b1b">DW0: 0xDDCCBBAA</text>
+  <text x="620" y="205" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#64748b">(swapped back!)</text>
+
+  <!-- Arrow 3 -->
+  <line x1="710" y1="170" x2="760" y2="170" stroke="#dc2626" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="735" y="160" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#dc2626">SERDES</text>
+
+  <!-- PCIe Wire Box -->
+  <rect x="770" y="120" width="180" height="100" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="860" y="145" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#166534">PCIe Wire</text>
+  <text x="860" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#166534">TLP Format (Correct!)</text>
+  <text x="860" y="190" font-family="monospace" font-size="10" text-anchor="middle" fill="#166534">Byte0=AA, Byte1=BB...</text>
+  <text x="860" y="205" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#64748b">(per PCIe spec)</text>
+
+  <!-- ============== RX PATH (Bottom) ============== -->
+  <text x="50" y="310" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#16a34a">RX Path (Host → Device)</text>
+  
+  <!-- PCIe Wire Box RX -->
+  <rect x="770" y="330" width="180" height="100" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="860" y="355" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#166534">PCIe Wire</text>
+  <text x="860" y="380" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#166534">TLP Format</text>
+  <text x="860" y="400" font-family="monospace" font-size="10" text-anchor="middle" fill="#166534">Byte0=AA, Byte1=BB...</text>
+
+  <!-- Arrow RX 1 -->
+  <line x1="770" y1="380" x2="720" y2="380" stroke="#16a34a" stroke-width="2" marker-end="url(#arrowhead-green)"/>
+  <text x="745" y="370" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#16a34a">SERDES</text>
+
+  <!-- Xilinx IP Box RX -->
+  <rect x="530" y="330" width="180" height="100" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+  <text x="620" y="355" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#991b1b">Xilinx PCIe IP</text>
+  <text x="620" y="380" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#991b1b">Always Swaps!</text>
+  <text x="620" y="400" font-family="monospace" font-size="10" text-anchor="middle" fill="#991b1b">DW0: 0xDDCCBBAA</text>
+
+  <!-- Arrow RX 2 -->
+  <line x1="530" y1="380" x2="480" y2="380" stroke="#dc2626" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="505" y="370" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#dc2626">swap</text>
+
+  <!-- PHY Interface Box RX -->
+  <rect x="290" y="330" width="180" height="100" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="380" y="355" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#92400e">PHY Interface</text>
+  <text x="380" y="380" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#92400e">Big-Endian DWORDs</text>
+  <text x="380" y="400" font-family="monospace" font-size="10" text-anchor="middle" fill="#92400e">DW0: 0xAABBCCDD</text>
+  <text x="380" y="415" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#64748b">(fmt at bits [31:29])</text>
+
+  <!-- Testbench callout RX -->
+  <rect x="295" y="435" width="170" height="30" rx="4" fill="#fecaca" stroke="#dc2626" stroke-width="2" stroke-dasharray="4,2"/>
+  <text x="380" y="455" font-family="Arial, sans-serif" font-size="11" font-weight="bold" text-anchor="middle" fill="#dc2626">⚠ TESTBENCH HERE ⚠</text>
+
+  <!-- Arrow RX 3 -->
+  <line x1="290" y1="380" x2="240" y2="380" stroke="#d97706" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="265" y="370" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#d97706">swap</text>
+
+  <!-- LitePCIe Internal Box RX -->
+  <rect x="50" y="330" width="180" height="100" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="140" y="355" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#1e40af">LitePCIe Internal</text>
+  <text x="140" y="380" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#1e40af">Native/Little-Endian</text>
+  <text x="140" y="400" font-family="monospace" font-size="10" text-anchor="middle" fill="#1e40af">DW0: 0xDDCCBBAA</text>
+
+  <!-- ============== KEY INSIGHT BOX ============== -->
+  <rect x="50" y="500" width="900" height="220" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="3"/>
+  <text x="500" y="530" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#166534">Key Insight: PHY Interface Format</text>
+  
+  <!-- Two columns -->
+  <!-- Left column - Format description -->
+  <text x="80" y="560" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1e293b">At PHY Interface (phy.sink / phy.source):</text>
+  <text x="80" y="585" font-family="Arial, sans-serif" font-size="13" fill="#1e293b">• Both headers AND data are big-endian DWORDs</text>
+  <text x="80" y="605" font-family="Arial, sans-serif" font-size="13" fill="#1e293b">• Header field positions match HeaderField definitions:</text>
+  <text x="100" y="625" font-family="monospace" font-size="12" fill="#64748b">fmt at bits [31:29], type at [28:24], etc.</text>
+  <text x="80" y="650" font-family="Arial, sans-serif" font-size="13" fill="#1e293b">• Xilinx will swap again, producing correct wire format</text>
+
+  <!-- Right column - Testbench rules -->
+  <rect x="500" y="545" width="430" height="160" rx="6" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+  <text x="520" y="570" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#854d0e">Testbench Rules:</text>
+  <text x="520" y="595" font-family="Arial, sans-serif" font-size="12" fill="#854d0e">✓ Build headers: fmt at [31:29] (no swap needed)</text>
+  <text x="520" y="615" font-family="Arial, sans-serif" font-size="12" fill="#854d0e">✓ Build data: int.from_bytes(data, 'big')</text>
+  <text x="520" y="640" font-family="Arial, sans-serif" font-size="12" fill="#854d0e">✓ Parse headers: use bit positions directly (no swap!)</text>
+  <text x="520" y="660" font-family="Arial, sans-serif" font-size="12" fill="#854d0e">✓ Parse data: swap if you need native integer</text>
+  <text x="520" y="690" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#dc2626">✗ DON'T swap header DWORDs when parsing!</text>
+
+  <!-- Footer -->
+  <text x="500" y="740" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#94a3b8">LitePCIe pre-swaps so that Xilinx's swap produces correct wire format. The PHY interface is the "meeting point" in big-endian.</text>
+</svg>

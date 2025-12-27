@@ -390,7 +390,7 @@ class BSADMAEngine(LiteXModule):
         # COMPLETE State: Signal completion
         # ---------------------------------------------------------------------
         # The PASID injector is self-latching (captures PASID on first beat),
-        # so we can transition to IDLE immediately after signaling status.
+        # so the engine can transition to IDLE immediately after signaling status.
 
         fsm.act("COMPLETE",
             self.busy.eq(0),
@@ -399,4 +399,4 @@ class BSADMAEngine(LiteXModule):
         )
 
         # Tie off unused completion sink when not waiting for completions
-        # (In WAIT_CPL state, we set ready=1 explicitly)
+        # (In WAIT_CPL state, ready=1 is set explicitly)

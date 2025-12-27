@@ -132,7 +132,7 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         else:
             main_tx_source = self.packetizer.source
 
-        # If we have raw TX sources (e.g., Message TLPs), arbitrate them with main TX
+        # If raw TX sources exist (e.g., Message TLPs), arbitrate them with main TX
         if raw_tx_sources:
             # Simple 2-source priority arbiter: raw sources have priority (they're rare)
             # Main TX path has lower priority, raw sources (like Message TLPs) take over
@@ -276,7 +276,7 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         
         # Completions need to go to the right BAR based on channel.
         # Broadcast to all master sinks - each crossbar filters by channel internally.
-        # Note: We can't use .connect() multiple times, so use explicit signals.
+        # Note: .connect() cannot be used multiple times, so use explicit signals.
         
         active_master_sinks = {
             bar_num: sink
@@ -326,8 +326,8 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
 class LitePCIeBAREndpoint(LiteXModule):
     """
     Lightweight wrapper providing endpoint-like interface for a single BAR.
-    
-    Used when you need to attach standard LitePCIe frontend components
+
+    Useful for attaching standard LitePCIe frontend components
     (like LitePCIeWishboneBridge) to a specific BAR's crossbar.
     
     Parameters

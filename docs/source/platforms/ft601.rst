@@ -1,0 +1,752 @@
+FT601 Interface Protocol
+========================
+
+The FTDI FT601 provides USB 3.0 SuperSpeed connectivity using a synchronous
+FIFO interface (FT245 mode). This document describes the signaling protocol
+used to transfer data between the FPGA and the USB host.
+
+Overview
+--------
+
+The FT601 presents a simple 32-bit wide synchronous FIFO interface:
+
+* **100 MHz clock** provided by FT601 to FPGA
+* **32-bit bidirectional data bus** with byte enables
+* **Status signals** indicate FIFO availability
+* **Control signals** drive read/write operations
+
+All operations are synchronous to the rising edge of ``ft601_clk``.
+
+Signal Summary
+--------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 15 65
+
+   * - Signal
+     - Direction
+     - Description
+   * - ``clk``
+     - FT601 → FPGA
+     - 100 MHz clock, all signals synchronous to rising edge
+   * - ``data[31:0]``
+     - Bidirectional
+     - 32-bit data bus
+   * - ``be[3:0]``
+     - FPGA → FT601
+     - Byte enable (active high), typically 0xF for 32-bit transfers
+   * - ``rxf_n``
+     - FT601 → FPGA
+     - RX FIFO status: low = data available to read
+   * - ``txe_n``
+     - FT601 → FPGA
+     - TX FIFO status: low = space available to write
+   * - ``oe_n``
+     - FPGA → FT601
+     - Output enable: low = FPGA drives data bus (for reads)
+   * - ``rd_n``
+     - FPGA → FT601
+     - Read strobe: low = read data from FT601
+   * - ``wr_n``
+     - FPGA → FT601
+     - Write strobe: low = write data to FT601
+   * - ``siwu_n``
+     - FPGA → FT601
+     - Send immediate / wake up (active low)
+   * - ``rst_n``
+     - FPGA → FT601
+     - Reset (active low)
+
+Read Operation (FT601 → FPGA)
+-----------------------------
+
+Reading data from the USB host involves:
+
+1. Check ``rxf_n`` is low (data available)
+2. Assert ``oe_n`` low (FPGA takes control of data bus direction)
+3. Wait one cycle for bus turnaround
+4. Assert ``rd_n`` low to start reading
+5. Capture data on each rising clock edge while ``rd_n`` is low
+6. Deassert ``rd_n`` when done or ``rxf_n`` goes high
+7. Deassert ``oe_n`` after ``rd_n``
+
+Timing Diagram
+^^^^^^^^^^^^^^
+
+::
+
+    clk      ‾‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾‾
+                 0    1    2    3    4    5    6    7    8
+
+    rxf_n    ‾‾‾‾\____________________________________/‾‾‾‾‾‾‾
+                      (data available)
+
+    oe_n     ‾‾‾‾‾‾‾‾\_______________________________/‾‾‾‾‾‾‾
+                      (FPGA controls bus)
+
+    rd_n     ‾‾‾‾‾‾‾‾‾‾‾‾\______________________/‾‾‾‾‾‾‾‾‾‾‾‾
+                          (read strobe)
+
+    data     ========XXXX[D0  ][D1  ][D2  ][D3  ]XXXX=========
+                          (valid data)
+
+**Key timing:**
+
+* ``oe_n`` must be asserted at least 1 cycle before ``rd_n``
+* Data is valid on the clock edge when ``rd_n`` is low
+* ``rxf_n`` going high indicates FIFO empty - stop reading
+
+Write Operation (FPGA → FT601)
+------------------------------
+
+Writing data to the USB host involves:
+
+1. Check ``txe_n`` is low (space available)
+2. Drive data on ``data[31:0]`` bus
+3. Assert ``wr_n`` low
+4. Data is captured by FT601 on rising clock edge
+5. Deassert ``wr_n`` when done or ``txe_n`` goes high
+
+Timing Diagram
+^^^^^^^^^^^^^^
+
+::
+
+    clk      ‾‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾‾
+                 0    1    2    3    4    5    6    7    8
+
+    txe_n    ‾‾‾‾\____________________________________/‾‾‾‾‾‾‾
+                      (space available)
+
+    oe_n     ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+                      (high - FT601 not driving)
+
+    data     ========[D0  ][D1  ][D2  ][D3  ][D4  ]==========
+                      (FPGA drives data)
+
+    wr_n     ‾‾‾‾‾‾‾‾\______________________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+                      (write strobe)
+
+    be[3:0]  ========[0xF ][0xF ][0xF ][0xF ][0xF ]==========
+                      (all bytes valid)
+
+**Key timing:**
+
+* Data must be stable before ``wr_n`` falling edge
+* ``txe_n`` going high indicates FIFO full - stop writing
+* ``oe_n`` must be high during writes
+
+Bus Turnaround
+--------------
+
+When switching between read and write operations, the bidirectional data bus
+requires turnaround time to avoid contention:
+
+::
+
+    (end of read)              (start of write)
+                    turnaround
+    oe_n     ______/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+    rd_n     ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+    data     [FT601 drives  ]XXXX[FPGA drives   ]
+    wr_n     ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\_____________
+
+The pcileech implementation uses explicit cooldown states (2 cycles) between
+read and write operations. The pcie_screamer implementation uses a timeout
+mechanism to switch between modes.
+
+Implementation Approaches
+-------------------------
+
+Two reference implementations exist:
+
+pcileech (SystemVerilog)
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+* 12-state FSM with explicit wait and cooldown states
+* Simple 5-entry shift register for TX buffering
+* Direct register outputs (no ODDR)
+* Proven on CaptainDMA/Squirrel hardware
+
+States: ``IDLE`` → ``RX_WAIT1/2/3`` → ``RX_ACTIVE`` → ``RX_COOLDOWN1/2`` → ``IDLE``
+        ``IDLE`` → ``TX_WAIT1/2`` → ``TX_ACTIVE`` → ``TX_COOLDOWN1/2`` → ``IDLE``
+
+pcie_screamer (Migen/LiteX)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* 4-state FSM with timeout-based mode switching
+* AsyncFIFO for clock domain crossing
+* ODDR primitives for output timing (see below)
+* LiteX stream interface
+
+States: ``IDLE`` → ``WRITE`` or ``RDWAIT`` → ``READ`` → ``IDLE``
+
+Using ODDR for Output Timing
+----------------------------
+
+The pcie_screamer implementation uses Xilinx ODDR (Output Double Data Rate)
+primitives to achieve precise output timing alignment with the FT601 clock.
+
+Why ODDR?
+^^^^^^^^^
+
+At 100 MHz (10ns period), timing margins are tight. Standard fabric registers
+have variable delays through the output path:
+
+::
+
+    Fabric FF → Output routing → IOB → Pad → FT601
+
+This delay varies with placement and routing, making timing closure difficult.
+ODDR primitives are located in the I/O block (IOB) adjacent to the pad,
+providing:
+
+* **Deterministic timing** - output changes precisely on clock edge
+* **Reduced clock-to-output delay** - shorter path from register to pad
+* **DDR capability** - can output data on both clock edges (not used here)
+
+ODDR Configuration
+^^^^^^^^^^^^^^^^^^
+
+The pcie_screamer uses ODDR in "SAME_EDGE" mode, outputting the same value
+on both edges (effectively SDR operation with IOB placement):
+
+.. code-block:: python
+
+    # Migen ODDR instantiation for control signals
+    self.specials += [
+        Instance("ODDR",
+            p_DDR_CLK_EDGE="SAME_EDGE",
+            i_C=ClockSignal("usb"),    # 100MHz FT601 clock
+            i_CE=1,                     # Always enabled
+            i_S=0, i_R=0,              # No set/reset
+            i_D1=_rd_n,                # Data for rising edge
+            i_D2=rd_n,                 # Data for falling edge
+            o_Q=pads.rd_n              # Output to pad
+        )
+    ]
+
+The implementation pipelines the control signals:
+
+.. code-block:: python
+
+    # Pipeline registers for timing
+    self.sync.usb += [
+        _rd_n.eq(rd_n),   # Delayed version
+        _wr_n.eq(wr_n),
+        _oe_n.eq(oe_n),
+    ]
+
+This creates a two-stage pipeline where ``rd_n`` is the FSM output and
+``_rd_n`` is delayed by one cycle, both fed to the ODDR.
+
+Data Bus ODDR
+^^^^^^^^^^^^^
+
+The 32-bit data bus also uses ODDR for each bit:
+
+.. code-block:: python
+
+    for i in range(dw):  # dw = 32
+        self.specials += [
+            Instance("ODDR",
+                p_DDR_CLK_EDGE="SAME_EDGE",
+                i_C=ClockSignal("usb"),
+                i_CE=1, i_S=0, i_R=0,
+                i_D1=_data_w[i],    # Previous cycle data
+                i_D2=data_w[i],     # Current cycle data
+                o_Q=tdata_w[i]      # To tristate buffer
+            )
+        ]
+
+Tristate Control
+^^^^^^^^^^^^^^^^
+
+The bidirectional data bus uses a Migen ``Tristate`` special:
+
+.. code-block:: python
+
+    self.specials += Tristate(
+        pads.data,      # Bidirectional pad
+        tdata_w,        # Output data (from ODDR)
+        data_oe,        # Output enable
+        data_r          # Input data (active sampling)
+    )
+
+    # OE controlled by FSM state
+    self.comb += data_oe.eq(oe_n)  # Drive bus when oe_n is high (writing)
+
+Timing Comparison
+^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Aspect
+     - Without ODDR
+     - With ODDR
+   * - Register location
+     - Fabric (variable)
+     - IOB (fixed)
+   * - Clock-to-output
+     - 2-5ns (varies)
+     - <1ns (deterministic)
+   * - Timing closure
+     - Difficult at 100MHz
+     - Reliable
+   * - Complexity
+     - Simple
+     - Requires primitives
+
+Trade-offs
+^^^^^^^^^^
+
+**Advantages of ODDR approach:**
+
+* Guaranteed timing margins
+* Works reliably across different builds
+* Professional approach for high-speed interfaces
+
+**Disadvantages:**
+
+* More complex HDL code
+* Xilinx-specific (not portable)
+* Harder to simulate
+
+The pcileech approach without ODDR works because it uses explicit wait states
+and the timing constraints place registers in IOBs via ``set_property IOB TRUE``.
+
+Application-Layer Protocols
+---------------------------
+
+The FT601 is a **raw FIFO** - it passes 32-bit words transparently between
+USB and FPGA with no inherent framing or packet structure. Any protocol
+layered on top is defined by the FPGA gateware and host software.
+
+Raw FIFO Characteristics
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+From the host perspective, the FT601 appears as a bulk USB endpoint:
+
+* **OUT endpoint** (host → FPGA): Write bytes, appear in FT601 TX FIFO
+* **IN endpoint** (FPGA → host): Read bytes from FT601 RX FIFO
+* **No packet boundaries**: Data is a continuous byte stream
+* **No flow control signaling**: Just raw data transfer
+
+The FPGA and host must agree on a framing protocol to delineate messages.
+
+pcie_screamer Protocol Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The pcie_screamer project defines a simple packet format for multiplexing
+multiple logical channels:
+
+::
+
+    Offset  Size  Field
+    ------  ----  -----------
+    0x00    4     Preamble (0x5aa55aa5)
+    0x04    4     Destination (channel ID)
+    0x08    4     Length (payload bytes)
+    0x0C    N     Payload
+
+**Channels:**
+
+* Channel 0: Wishbone/Etherbone (register access)
+* Channel 1: TLP data (PCIe transactions)
+
+The ``USBPacketizer`` adds this header on TX, ``USBDepacketizer`` strips it
+on RX and routes to the appropriate channel via ``USBCrossbar``.
+
+BSA Monitoring Protocol
+^^^^^^^^^^^^^^^^^^^^^^^
+
+.. admonition:: REVISIT
+
+   This references ``docs/specs/usb_monitoring_design.md`` which is
+   a temporary markdown doc. Migrate to Sphinx when the monitoring subsystem
+   is implemented.
+
+For PCIe transaction monitoring, we define a richer packet format:
+
+::
+
+    Offset  Size  Field
+    ------  ----  -----------
+    0x00    4     Magic (0x50434945 = "PCIE")
+    0x04    4     Sequence number
+    0x08    8     Timestamp (64-bit, ns resolution)
+    0x10    2     Packet type
+    0x12    2     Flags (direction, attributes, BAR hit)
+    0x14    2     Payload length
+    0x16    2     Reserved
+    0x18    8     Reserved (pad to 32 bytes)
+    0x20    N     Payload (TLP data, up to 224 bytes)
+
+All packets are 32-byte aligned for efficient USB transfer.
+
+Host Software Interface
+-----------------------
+
+Python with ftd3xx
+^^^^^^^^^^^^^^^^^^
+
+FTDI provides the ``ftd3xx`` library for USB 3.0 SuperSpeed devices:
+
+.. code-block:: python
+
+    import ftd3xx
+
+    # Open device
+    dev = ftd3xx.create(0, ftd3xx.FT_OPEN_BY_INDEX)
+    if dev is None:
+        raise RuntimeError("FT601 not found")
+
+    # Configure for FIFO mode
+    dev.setPipeTimeout(0x82, 1000)  # IN endpoint, 1s timeout
+    dev.setPipeTimeout(0x02, 1000)  # OUT endpoint
+
+    # Read data (FPGA → Host)
+    buf = bytes(4096)
+    transferred = dev.readPipe(0x82, buf, len(buf))
+    data = buf[:transferred]
+
+    # Write data (Host → FPGA)
+    dev.writePipe(0x02, bytes([0x01, 0x02, 0x03, 0x04]))
+
+    dev.close()
+
+Decoding pcie_screamer Packets
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    import struct
+
+    PREAMBLE = 0x5aa55aa5
+
+    def decode_packets(data: bytes):
+        """Decode pcie_screamer format packets."""
+        offset = 0
+        while offset + 12 <= len(data):
+            # Parse header
+            preamble, dest, length = struct.unpack_from('<III', data, offset)
+
+            if preamble != PREAMBLE:
+                # Lost sync - scan for preamble
+                offset += 4
+                continue
+
+            # Extract payload
+            payload_start = offset + 12
+            payload_end = payload_start + length
+            if payload_end > len(data):
+                break  # Incomplete packet
+
+            payload = data[payload_start:payload_end]
+            yield {'channel': dest, 'length': length, 'payload': payload}
+
+            offset = payload_end
+
+    # Usage
+    for packet in decode_packets(data):
+        if packet['channel'] == 1:  # TLP channel
+            process_tlp(packet['payload'])
+
+Decoding BSA Monitor Packets
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    import struct
+    from dataclasses import dataclass
+    from enum import IntEnum
+
+    class PacketType(IntEnum):
+        TXN_INBOUND_REQ  = 0x0001
+        TXN_OUTBOUND_REQ = 0x0003
+        TXN_MSI          = 0x0005
+        CTRL_OVERFLOW    = 0x0100
+
+    @dataclass
+    class MonitorPacket:
+        seq_num: int
+        timestamp_ns: int
+        pkt_type: PacketType
+        flags: int
+        payload: bytes
+
+        @property
+        def is_write(self):
+            return bool(self.flags & 0x01)
+
+        @property
+        def bar_hit(self):
+            return (self.flags >> 8) & 0x07
+
+    MAGIC = 0x50434945  # "PCIE"
+
+    def decode_monitor_packets(data: bytes):
+        """Decode BSA monitor format packets."""
+        offset = 0
+        while offset + 32 <= len(data):
+            # Parse 32-byte header
+            magic, seq, ts, ptype, flags, length, _, _ = struct.unpack_from(
+                '<IIQHHHHQ', data, offset
+            )
+
+            if magic != MAGIC:
+                offset += 32  # Skip to next aligned position
+                continue
+
+            # Extract payload
+            payload = data[offset + 32 : offset + 32 + length]
+
+            yield MonitorPacket(
+                seq_num=seq,
+                timestamp_ns=ts,
+                pkt_type=PacketType(ptype),
+                flags=flags,
+                payload=payload
+            )
+
+            # Advance to next 32-byte aligned packet
+            offset += 32 + ((length + 31) & ~31)
+
+Live Capture Example
+^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    #!/usr/bin/env python3
+    """Live PCIe transaction monitor."""
+
+    import ftd3xx
+    from rich.console import Console
+    from rich.table import Table
+    from rich.live import Live
+
+    console = Console()
+
+    def main():
+        dev = ftd3xx.create(0, ftd3xx.FT_OPEN_BY_INDEX)
+        dev.setPipeTimeout(0x82, 100)
+
+        table = Table(title="PCIe Transactions")
+        table.add_column("Time (ms)")
+        table.add_column("Dir")
+        table.add_column("Type")
+        table.add_column("BAR")
+        table.add_column("Address")
+        table.add_column("Length")
+
+        buf = bytes(32 * 1024)  # 32KB buffer
+
+        with Live(table, refresh_per_second=10):
+            while True:
+                n = dev.readPipe(0x82, buf, len(buf))
+                if n > 0:
+                    for pkt in decode_monitor_packets(buf[:n]):
+                        # Parse address from payload
+                        if len(pkt.payload) >= 8:
+                            addr = struct.unpack_from('<Q', pkt.payload, 0)[0]
+                        else:
+                            addr = 0
+
+                        table.add_row(
+                            f"{pkt.timestamp_ns / 1e6:.3f}",
+                            "OUT" if pkt.pkt_type == PacketType.TXN_OUTBOUND_REQ else "IN",
+                            "WR" if pkt.is_write else "RD",
+                            str(pkt.bar_hit),
+                            f"0x{addr:08X}",
+                            str(len(pkt.payload))
+                        )
+
+                        # Limit table size
+                        if len(table.rows) > 50:
+                            table.rows.pop(0)
+
+    if __name__ == "__main__":
+        main()
+
+pcie_screamer Software Architecture
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The pcie_screamer project uses a **bridge daemon** pattern that decouples
+Python scripts from direct USB access:
+
+::
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                         Host PC                                  │
+    │                                                                  │
+    │  ┌──────────────┐     UDP 1234      ┌──────────────────────┐    │
+    │  │ etherbone.py │◄─────────────────►│                      │    │
+    │  │ (CSR access) │                    │      usb2udp.c       │    │
+    │  └──────────────┘                    │                      │    │
+    │                                      │  (USB ↔ UDP bridge)  │    │
+    │  ┌──────────────┐     UDP 2345      │                      │    │
+    │  │   dump.py    │◄─────────────────►│                      │    │
+    │  │ (TLP inject) │                    └──────────┬───────────┘    │
+    │  └──────────────┘                               │                │
+    │                                                 │ FT601/USB      │
+    └─────────────────────────────────────────────────┼────────────────┘
+                                                      │
+                                                      ▼
+                                                ┌───────────┐
+                                                │   FPGA    │
+                                                └───────────┘
+
+**usb2udp.c** - The bridge daemon:
+
+* Opens FT601 via FTDI's ``FTD3XX`` library
+* Creates UDP sockets for each logical USB channel
+* Channel 0 ↔ UDP port 1234 (Etherbone/Wishbone)
+* Channel 1 ↔ UDP port 2345 (TLP data)
+* Handles preamble/port/length framing transparently
+
+**Etherbone** - LiteX remote bus access protocol:
+
+* Standard LiteX protocol for Wishbone read/write over network
+* Normally used over Ethernet (hence "Etherbone")
+* Here tunneled: Etherbone → UDP → usb2udp → USB → FPGA
+* Allows standard LiteX tools (``litex_server``, ``litescope``) to work
+
+**Workflow:**
+
+1. Start ``usb2udp`` daemon (connects to FT601, listens on UDP ports)
+2. Python scripts send/receive via localhost UDP sockets
+3. ``usb2udp`` wraps outgoing data with channel framing
+4. ``usb2udp`` unwraps incoming data and routes to correct UDP port
+5. Scripts are unaware they're using USB
+
+This pattern has advantages:
+
+* Python doesn't need FTD3XX bindings
+* Multiple scripts can share the USB connection
+* Standard networking tools work (``netcat``, Wireshark on loopback)
+* Easy to switch between USB and real Ethernet
+
+Example - CSR access via Etherbone:
+
+.. code-block:: python
+
+    # etherbone.py - talks to UDP, not USB!
+    self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def read(self, addr):
+        record = EtherboneRecord()
+        record.reads = EtherboneReads(addrs=[addr])
+        packet = EtherbonePacket()
+        packet.records = [record]
+        packet.encode()
+
+        # Send to usb2udp daemon on localhost
+        self.socket.sendto(bytes(packet), ("127.0.0.1", 1234))
+
+        # Receive response (routed back by usb2udp)
+        data, _ = self.socket.recvfrom(1024)
+        return decode_response(data)
+
+Example - TLP injection via dump.py:
+
+.. code-block:: python
+
+    # dump.py - sends raw TLPs via UDP port 2345
+    def read(self, address):
+        rd = RD32()  # PCIe Memory Read TLP
+        rd.address = address // 4
+        rd.requester_id = 0x100
+        rd.encode_dwords()
+
+        packet = bytes()
+        for dword in rd.dwords:
+            packet += dword.to_bytes(4, byteorder="little")
+
+        # Send to usb2udp daemon
+        self.socket.sendto(packet, ("127.0.0.1", 2345))
+
+        # Wait for completion TLP
+        data, _ = self.socket.recvfrom(1024)
+        # ... parse CPLD response
+
+Alternative: libusb
+^^^^^^^^^^^^^^^^^^^
+
+For cross-platform support without FTDI drivers, ``pyusb`` with ``libusb``
+works but at reduced performance:
+
+.. code-block:: python
+
+    import usb.core
+    import usb.util
+
+    # Find FT601
+    dev = usb.core.find(idVendor=0x0403, idProduct=0x601f)
+    if dev is None:
+        raise RuntimeError("FT601 not found")
+
+    dev.set_configuration()
+
+    # Read from IN endpoint
+    data = dev.read(0x82, 4096, timeout=1000)
+
+    # Write to OUT endpoint
+    dev.write(0x02, [0x01, 0x02, 0x03, 0x04])
+
+Byte Ordering
+-------------
+
+The FT601 uses little-endian byte ordering on the USB bus. The pcileech
+implementation includes byte swapping in the datapath:
+
+.. code-block:: verilog
+
+    // RX: FT601 → FPGA (swap bytes)
+    dout[7:0]   <= FT601_DATA[31:24];
+    dout[15:8]  <= FT601_DATA[23:16];
+    dout[23:16] <= FT601_DATA[15:8];
+    dout[31:24] <= FT601_DATA[7:0];
+
+    // TX: FPGA → FT601 (swap bytes)
+    FT601_DATA = {data_out[7:0], data_out[15:8],
+                  data_out[23:16], data_out[31:24]};
+
+FPGA Timing Constraints
+-----------------------
+
+For reliable operation at 100 MHz, proper I/O timing constraints are required:
+
+.. code-block:: tcl
+
+    # Clock definition
+    create_clock -period 10.000 -name ft601_clk [get_ports ft601_clk]
+
+    # Input timing (FT601 → FPGA)
+    # Data valid 6.5-7.0ns after clock edge
+    set_input_delay -clock ft601_clk -min 6.5 [get_ports {ft601_data[*]}]
+    set_input_delay -clock ft601_clk -max 7.0 [get_ports {ft601_data[*]}]
+    set_input_delay -clock ft601_clk -min 6.5 [get_ports {ft601_rxf_n ft601_txe_n}]
+    set_input_delay -clock ft601_clk -max 7.0 [get_ports {ft601_rxf_n ft601_txe_n}]
+
+    # Output timing (FPGA → FT601)
+    # Setup: data stable 1.0ns before clock
+    # Hold: data stable 4.8ns after clock
+    set_output_delay -clock ft601_clk -max 1.0 [get_ports {ft601_wr_n ft601_rd_n ft601_oe_n}]
+    set_output_delay -clock ft601_clk -min -4.8 [get_ports {ft601_wr_n ft601_rd_n ft601_oe_n}]
+
+    # Place registers in IOB for timing
+    set_property IOB TRUE [get_cells {*ft601*oe_n_reg*}]
+    set_property IOB TRUE [get_cells {*ft601*rd_n_reg*}]
+    set_property IOB TRUE [get_cells {*ft601*wr_n_reg*}]
+
+References
+----------
+
+* FTDI FT601 Datasheet: `FT601Q-B <https://ftdichip.com/products/ft601q-b/>`_
+* FTDI AN_370: FT601 Software Programming Guide
+* FTDI AN_421: FT600/FT601 Application Note
+* pcileech-fpga: ``external/pcileech-fpga/CaptainDMA/35t484_x1/src/pcileech_ft601.sv``
+* pcie_screamer: ``external/pcie_screamer/gateware/ft601.py``

@@ -113,7 +113,7 @@ class LitePCIeMSIXController(LiteXModule):
             ),
         )
 
-        # Unused completion sink (we only send posted writes)
+        # Unused completion sink - MSI-X uses only posted writes
         self.comb += port.sink.ready.eq(1)
 
 

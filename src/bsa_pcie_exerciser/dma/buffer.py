@@ -138,9 +138,9 @@ class _BSADMABufferXPM(Module):
         - Supports read/write from host via BAR1 memory space
         - Byte-granular write enables for partial writes
 
-    Note that we use the Xilinx XPM True Dual Port memory here instead of letting Xilinx
-    try to infer the memory.  The Verilog netlist output by Migen's Memory primitive
-    doesn't play nicely with true dual port RAM inferencing.
+    Uses Xilinx XPM True Dual Port memory instead of relying on memory inference.
+    The Verilog netlist output by Migen's Memory primitive does not synthesize
+    correctly as true dual port RAM.
 
     """
 

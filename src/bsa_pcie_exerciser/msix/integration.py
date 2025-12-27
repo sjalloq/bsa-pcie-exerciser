@@ -242,7 +242,7 @@ class LitePCIeMultiBAREndpointMSIX(LiteXModule):
         
         # Completions need to go to the right BAR based on channel.
         # Broadcast to all master sinks - each crossbar filters by channel internally.
-        # Note: We can't use .connect() multiple times, so use explicit signals.
+        # Note: .connect() cannot be used multiple times, so use explicit signals.
         
         cmp_source = self.depacketizer.cmp_source
         
