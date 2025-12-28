@@ -8,9 +8,12 @@
 """
 Integration tests for ATS (Address Translation Services) and ATC (Address Translation Cache).
 
-Includes the critical PASID bug test that exposes BUG 1:
-- DMA engine bypasses ATC's PASID-aware lookup interface
-- Uses address-only matching, ignoring PASID context
+Tests cover:
+- ATS translation request generation
+- ATC lookup with PASID context matching (hit and miss cases)
+- ATC invalidation
+- PASID TLP prefix insertion
+- Privileged and execute mode flags
 """
 
 import sys
@@ -261,34 +264,27 @@ async def test_ats_request_generation(dut):
 
 
 # =============================================================================
-# PASID Bug Test (BUG 1)
+# ATC PASID Context Tests
 # =============================================================================
 
 @cocotb.test()
 async def test_atc_pasid_mismatch(dut):
     """
-    CRITICAL BUG TEST: Verify ATC lookup fails when PASID doesn't match.
+    Verify ATC lookup fails when PASID context doesn't match.
 
-    This test exposes BUG 1: The DMA engine bypasses the ATC's PASID-aware
-    lookup interface and directly accesses internal signals, performing
-    address-only matching without PASID verification.
+    ATC entries are tagged with PASID context. A DMA with a different PASID
+    should NOT match an existing ATC entry, even if the virtual address matches.
 
     Test scenario:
     1. Configure ATS with PASID=5, trigger translation request
     2. Inject translation completion for VA=0x1000_0000 -> PA=0x8000_0000
-    3. Configure DMA with PASID=10 (different!), enable ATC lookup
+    3. Configure DMA with PASID=10 (different), enable ATC lookup
     4. Trigger DMA write to VA=0x1000_0000
     5. Capture DMA TLP and verify the address used
 
-    Expected behavior (after fix):
+    Expected:
     - ATC lookup should MISS due to PASID mismatch
-    - DMA TLP should use UNTRANSLATED address 0x1000_0000
-
-    Current buggy behavior:
-    - ATC lookup incorrectly HITS (ignores PASID)
-    - DMA TLP uses TRANSLATED address 0x8000_0000
-
-    This test should FAIL with current code and PASS after the fix.
+    - DMA TLP should use untranslated address 0x1000_0000
     """
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
 
@@ -332,7 +328,7 @@ async def test_atc_pasid_mismatch(dut):
         tag=tag,
         translated_addr=translated_pa,
         s_field=0,  # 4KB range
-        permissions=0x3F,  # R/W/Priv
+        permissions=0x03,  # R=1, W=1 (bits [1:0]), U=0 for valid translation
     )
 
     # Inject completion (no BAR hit - completions are matched by tag)
@@ -392,14 +388,12 @@ async def test_atc_pasid_mismatch(dut):
     # =========================================================================
 
     if address == translated_pa:
-        # BUG! ATC matched despite PASID mismatch
         raise AssertionError(
-            f"BUG DETECTED: DMA used translated address 0x{translated_pa:08X}\n"
-            f"ATC incorrectly matched despite PASID mismatch!\n"
+            f"ATC incorrectly matched despite PASID mismatch\n"
+            f"  DMA used translated address: 0x{translated_pa:08X}\n"
             f"  ATS PASID = {pasid_ats}\n"
             f"  DMA PASID = {pasid_dma}\n"
-            f"Expected: DMA should use untranslated address 0x{test_va:08X}\n"
-            f"This test exposes BUG 1: DMA engine bypasses ATC's PASID matching"
+            f"Expected: Untranslated address 0x{test_va:08X} (ATC miss)"
         )
     elif address == test_va:
         dut._log.info("CORRECT: DMA used untranslated address (ATC miss due to PASID mismatch)")
@@ -408,6 +402,141 @@ async def test_atc_pasid_mismatch(dut):
         raise AssertionError(
             f"Unexpected address 0x{address:08X}\n"
             f"Expected untranslated 0x{test_va:08X} or translated 0x{translated_pa:08X}"
+        )
+
+
+@cocotb.test()
+async def test_atc_pasid_match(dut):
+    """
+    Verify ATC lookup succeeds when PASID context matches.
+
+    When DMA uses the same PASID as the ATS translation, the ATC should hit
+    and the DMA TLP should use the translated (physical) address.
+
+    Test scenario:
+    1. Configure ATS with PASID=5, trigger translation request
+    2. Inject translation completion for VA=0x1000_0000 -> PA=0x8000_0000
+    3. Configure DMA with same PASID=5, enable ATC lookup
+    4. Trigger DMA write to VA=0x1000_0000
+    5. Capture DMA TLP and verify translated address is used
+
+    Expected:
+    - ATC lookup should HIT due to PASID match
+    - DMA TLP should use translated address 0x8000_0000
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    # =========================================================================
+    # Step 1: Configure ATS with PASID=5 and trigger translation
+    # =========================================================================
+    dut._log.info("Step 1: Configure ATS with PASID=5")
+
+    test_va = 0x1000_0000
+    translated_pa = 0x8000_0000
+    pasid = 5  # Same PASID for both ATS and DMA
+
+    await write_bar0_register(bfm, REG_DMA_BUS_ADDR_LO, test_va)
+    await write_bar0_register(bfm, REG_DMA_BUS_ADDR_HI, 0)
+    await write_bar0_register(bfm, REG_PASID_VAL, pasid)
+
+    # Trigger ATS with PASID enabled
+    atsctl = ATSCTL_TRIGGER | ATSCTL_PASID_EN
+    await write_bar0_register(bfm, REG_ATSCTL, atsctl)
+
+    # Wait for ATS request TLP
+    ats_req = await bfm.capture_tlp(timeout_cycles=500)
+    if ats_req is None:
+        raise AssertionError("No ATS request TLP captured")
+
+    tag = extract_tag_from_tlp(ats_req)
+    dut._log.info(f"ATS request captured, tag={tag}")
+
+    # =========================================================================
+    # Step 2: Inject Translation Completion
+    # =========================================================================
+    dut._log.info(f"Step 2: Inject translation completion VA=0x{test_va:08X} -> PA=0x{translated_pa:08X}")
+
+    cpl_beats = TLPBuilder.ats_translation_completion(
+        requester_id=0x0100,  # Our device
+        completer_id=0x0200,  # SMMU/IOMMU
+        tag=tag,
+        translated_addr=translated_pa,
+        s_field=0,  # 4KB range
+        permissions=0x03,  # R=1, W=1 (bits [1:0]), U=0 for valid translation
+    )
+
+    # Inject completion (no BAR hit - completions are matched by tag)
+    await bfm.inject_tlp(cpl_beats, bar_hit=0b000000)
+
+    # Wait for ATC to be populated
+    await ClockCycles(bfm.clk, 20)
+
+    # =========================================================================
+    # Step 3: Configure DMA with SAME PASID=5
+    # =========================================================================
+    dut._log.info(f"Step 3: Configure DMA with same PASID={pasid}")
+
+    # Pre-load data in DMA buffer via BAR1
+    test_data = 0xDEADBEEFCAFEBABE
+    bar1_write = TLPBuilder.memory_write_32(
+        address=0x0,  # BAR1 offset 0
+        data_bytes=test_data.to_bytes(8, 'little'),
+        requester_id=0x0100,
+        tag=0,
+    )
+    await bfm.inject_tlp(bar1_write, bar_hit=0b000010)  # BAR1
+    await ClockCycles(bfm.clk, 10)
+
+    # Configure DMA parameters with same PASID
+    await write_bar0_register(bfm, REG_PASID_VAL, pasid)  # Same PASID
+    await write_bar0_register(bfm, REG_DMA_BUS_ADDR_LO, test_va)  # Same VA
+    await write_bar0_register(bfm, REG_DMA_BUS_ADDR_HI, 0)
+    await write_bar0_register(bfm, REG_DMA_LEN, 8)  # 8 bytes
+    await write_bar0_register(bfm, REG_DMA_OFFSET, 0)  # Buffer offset 0
+
+    # =========================================================================
+    # Step 4: Trigger DMA write with ATC lookup enabled
+    # =========================================================================
+    dut._log.info("Step 4: Trigger DMA write with ATC lookup and PASID enabled")
+
+    # DMACTL: direction=1 (write to host), pasid_en=1, use_atc=1
+    dmactl = DMACTL_TRIGGER | DMACTL_DIRECTION | DMACTL_PASID_EN | DMACTL_USE_ATC
+    await write_bar0_register(bfm, REG_DMACTL, dmactl)
+
+    # =========================================================================
+    # Step 5: Capture DMA TLP and verify address
+    # =========================================================================
+    dut._log.info("Step 5: Capture DMA TLP and verify address")
+
+    dma_tlp = await bfm.capture_tlp(timeout_cycles=1000)
+
+    if dma_tlp is None:
+        raise AssertionError("Timeout waiting for DMA TLP - DMA engine did not generate request")
+
+    address = extract_address_from_tlp(dma_tlp)
+    dut._log.info(f"DMA TLP address = 0x{address:08X}")
+
+    # =========================================================================
+    # Step 6: Verify - should be TRANSLATED due to PASID match
+    # =========================================================================
+
+    if address == translated_pa:
+        dut._log.info("CORRECT: DMA used translated address (ATC hit with PASID match)")
+        dut._log.info("test_atc_pasid_match PASSED")
+    elif address == test_va:
+        raise AssertionError(
+            f"ATC failed to match despite PASID match\n"
+            f"  DMA used untranslated address: 0x{test_va:08X}\n"
+            f"  PASID = {pasid}\n"
+            f"Expected: Translated address 0x{translated_pa:08X} (ATC hit)"
+        )
+    else:
+        raise AssertionError(
+            f"Unexpected address 0x{address:08X}\n"
+            f"Expected translated 0x{translated_pa:08X} or untranslated 0x{test_va:08X}"
         )
 
 
@@ -432,7 +561,6 @@ async def test_atc_clear(dut):
     await ClockCycles(bfm.clk, 10)
 
     # Verify ATC is cleared by checking that subsequent DMA doesn't use translation
-    # (This is a basic test - full verification would require the PASID bug fix first)
 
     dut._log.info("test_atc_clear PASSED")
 

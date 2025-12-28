@@ -26,7 +26,27 @@ TLP Type encodings (Fmt[2:0] | Type[4:0]):
 - Memory Write 64: Fmt=011, Type=00000 -> 0x60
 - Completion:      Fmt=000, Type=01010 -> 0x0A
 - Completion w/D:  Fmt=010, Type=01010 -> 0x4A
+
+ATS Translation Completion permission bits (bits [5:0]):
+- Bit 0: R (Read permission)
+- Bit 1: W (Write permission)
+- Bit 2: Priv (Privileged mode result)
+- Bit 3: G (Global PASID)
+- Bit 4: U (Untranslated - MUST be 0 for valid translation)
+- Bit 5: N (No-snoop attribute)
 """
+
+# ATS Translation Completion permission bit constants
+ATS_PERM_R     = 0x01  # Read permission
+ATS_PERM_W     = 0x02  # Write permission
+ATS_PERM_PRIV  = 0x04  # Privileged mode result
+ATS_PERM_G     = 0x08  # Global PASID
+ATS_PERM_U     = 0x10  # Untranslated (error flag - should be 0 for valid)
+ATS_PERM_N     = 0x20  # No-snoop attribute
+
+# Common permission combinations
+ATS_PERM_RW          = ATS_PERM_R | ATS_PERM_W                    # 0x03: Read + Write
+ATS_PERM_RW_PRIV     = ATS_PERM_R | ATS_PERM_W | ATS_PERM_PRIV    # 0x07: Read + Write + Privileged
 
 
 class TLPBuilder:
@@ -188,18 +208,22 @@ class TLPBuilder:
         Returns:
             List of beat dicts with 'dat' and 'be' keys
         """
-        # ATS Translation Completion is a CplD with 2 DWORDs of data
-        # Data format: [TranslatedAddr63:12 | S | N | U | R | W | P | 0 | 0]
-        #              [TranslatedAddr11:0 (always 0 for page) | Reserved]
-
-        # Build translation data (8 bytes)
-        # Lower DWORD: [Addr[31:12] | S[4:0] | N | U | R | W | Priv | Reserved]
-        # Upper DWORD: [Addr[63:32]]
-
-        # Simplified: just put the translated address with permissions
+        # ATS Translation Completion data format (per PCIe ATS spec):
+        # Bits [63:12]: Translated address (page-aligned)
+        # Bits [11:6]:  S field (size = 2^(S+12) bytes, 5 bits used)
+        # Bit  [5]:     N (No-snoop)
+        # Bit  [4]:     U (Untranslated - MUST be 0 for valid translation)
+        # Bit  [3]:     G (Global PASID)
+        # Bit  [2]:     Priv (Privileged mode)
+        # Bit  [1]:     W (Write permission)
+        # Bit  [0]:     R (Read permission)
+        #
+        # permissions parameter format: [N, U, G, Priv, W, R] at bits [5:0]
+        # For valid translation, caller should ensure U=0 (bit 4 clear)
+        # Example: permissions=0x03 means R=1, W=1, all else 0
         lower_dw = ((translated_addr & 0xFFFFF000) |
-                    ((s_field & 0x1F) << 7) |
-                    ((permissions & 0x3F) << 1))
+                    ((s_field & 0x1F) << 6) |
+                    (permissions & 0x3F))
         upper_dw = (translated_addr >> 32) & 0xFFFFFFFF
 
         # Pack as 8 bytes (little endian for LitePCIe data path)

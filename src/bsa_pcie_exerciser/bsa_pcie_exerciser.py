@@ -331,9 +331,12 @@ class BSAExerciserSoC(SoCMini):
 
         # ATS Engine and ATC --------------------------------------------------------
         self.atc = ATC()
+        # Get master port first to obtain channel for completion routing
+        ats_port = self.pcie_endpoint.crossbar.get_master_port()
         self.ats_engine = ATSEngine(
             phy        = self.pcie_phy,
             data_width = self.pcie_phy.data_width,
+            channel    = ats_port.channel,
         )
 
         # NOTE: PASID signals now travel through the stream (phy_layout).
@@ -397,7 +400,6 @@ class BSAExerciserSoC(SoCMini):
         ]
 
         # Connect ATS engine to master port for TLP requests
-        ats_port = self.pcie_endpoint.crossbar.get_master_port()
         self.comb += [
             self.ats_engine.source.connect(ats_port.source),
             ats_port.sink.connect(self.ats_engine.sink),

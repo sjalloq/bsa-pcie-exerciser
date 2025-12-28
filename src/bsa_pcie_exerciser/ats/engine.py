@@ -86,11 +86,12 @@ class ATSEngine(LiteXModule):
         Permission bits [6:0] = {read_priv, 0, write_priv, exec_priv, read, write, exec}
     """
 
-    def __init__(self, phy, data_width=64):
+    def __init__(self, phy, data_width=64, channel=0):
         assert data_width >= 64, "Minimum 64-bit data width"
 
         self.phy = phy
         self.data_width = data_width
+        self.channel = channel
 
         # =====================================================================
         # Control Interface (from BSARegisters)
@@ -217,7 +218,7 @@ class ATSEngine(LiteXModule):
 
         # Common request fields
         self.comb += [
-            source.channel.eq(0),
+            source.channel.eq(self.channel),
             source.req_id.eq(phy.id),
             source.tag.eq(current_tag),
             source.attr.eq(0),  # No special attributes for ATS
@@ -309,23 +310,35 @@ class ATSEngine(LiteXModule):
 
         trans_addr = Signal(64)
         s_field    = Signal(5)  # S-field is 5 bits per PCIe ATS spec (bits [10:6])
-        n_bit      = Signal()
-        u_bit      = Signal()
-        w_bit      = Signal()
-        r_bit      = Signal()
+        n_bit      = Signal()   # No-snoop
+        u_bit      = Signal()   # Untranslated (error)
+        g_bit      = Signal()   # Global PASID
+        priv_bit   = Signal()   # Privileged mode result
+        w_bit      = Signal()   # Write permission
+        r_bit      = Signal()   # Read permission
 
         self.comb += [
             trans_addr.eq(cpl_data & 0xFFFFFFFFFFFFF000),  # Page-aligned
             s_field.eq((cpl_data >> 6) & 0x1F),  # 5 bits per spec
             n_bit.eq((cpl_data >> 5) & 1),
             u_bit.eq((cpl_data >> 4) & 1),
+            g_bit.eq((cpl_data >> 3) & 1),
+            priv_bit.eq((cpl_data >> 2) & 1),
             w_bit.eq((cpl_data >> 1) & 1),
             r_bit.eq(cpl_data & 1),
         ]
 
+        # Privileged permission: if request was privileged AND response has Priv=1,
+        # then R/W permissions apply to privileged access
+        read_priv  = Signal()
+        write_priv = Signal()
+        self.comb += [
+            read_priv.eq(r_bit & current_priv & priv_bit),
+            write_priv.eq(w_bit & current_priv & priv_bit),
+        ]
+
         fsm.act("PARSE_CPL",
             self.in_flight.eq(1),
-            self.result_we.eq(1),
 
             If(u_bit,
                 # U=1 means translation failed
@@ -339,20 +352,36 @@ class ATSEngine(LiteXModule):
                 NextValue(self.range_size, 1 << (s_field + 12)),
                 # Cacheable if R or W permission granted
                 NextValue(self.cacheable, r_bit | w_bit),
-                # Store permissions: [6]=read_priv, [4]=write_priv, [3]=exec_priv,
-                #                    [2]=read, [1]=write, [0]=exec
-                # Note: Execute permission requires separate handling
+                # Permission register layout per ACS ATSPermissionReg:
+                #   [0] = ExecutePermission (not in basic ATS completion)
+                #   [1] = WritePermission
+                #   [2] = ReadPermission
+                #   [3] = ExecutePrivileged (not in basic ATS completion)
+                #   [4] = WritePrivileged
+                #   [5] = Reserved
+                #   [6] = ReadPrivileged
+                #   [7] = Reserved
                 NextValue(self.permissions, Cat(
-                    0,      # [0] exec (not in basic ATS)
-                    w_bit,  # [1] write
-                    r_bit,  # [2] read
-                    0,      # [3] exec_priv
-                    0,      # [4] write_priv (would need priv response)
-                    0,      # [5] reserved
-                    0,      # [6] read_priv
-                    0,      # [7] reserved
+                    0,           # [0] exec (not in basic ATS)
+                    w_bit,       # [1] write
+                    r_bit,       # [2] read
+                    0,           # [3] exec_priv (not in basic ATS)
+                    write_priv,  # [4] write_priv
+                    0,           # [5] reserved
+                    read_priv,   # [6] read_priv
+                    0,           # [7] reserved
                 )),
             ),
 
+            NextState("STORE"),
+        )
+
+        # ---------------------------------------------------------------------
+        # STORE: Assert result_we after success has been updated
+        # ---------------------------------------------------------------------
+
+        fsm.act("STORE",
+            self.in_flight.eq(1),
+            self.result_we.eq(1),  # Now success is valid
             NextState("IDLE"),
         )
