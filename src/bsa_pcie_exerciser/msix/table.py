@@ -101,10 +101,10 @@ class LitePCIeMSIXTable(Module):
         self.specials.mem = mem = Memory(64, n_entries, init=mem_init)
 
         # Port A: PCIe access with byte enables
-        self.specials.port_a = port_a = mem.get_port(write_capable=True, we_granularity=8)
+        self.specials.port_a = port_a = mem.get_port(write_capable=True, we_granularity=8, mode=READ_FIRST)
 
         # Port B: Internal read (for controller)
-        self.specials.port_b = port_b = mem.get_port(has_re=True)
+        self.specials.port_b = port_b = mem.get_port(has_re=True, mode=READ_FIRST)
 
         # =====================================================================
         # PCIe Access FSM

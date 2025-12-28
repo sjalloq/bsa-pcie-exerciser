@@ -96,6 +96,8 @@ class BSAExerciserSoC(SoCMini):
     - BAR5: MSI-X PBA (4KB)
     """
 
+    MSIX_VECTORS = 16
+
     mem_map = {
         "csr": 0x8000_0000,
     }
@@ -215,13 +217,13 @@ class BSAExerciserSoC(SoCMini):
         self.msix_table = LitePCIeMSIXTable(
             phy        = self.pcie_phy,
             data_width = self.pcie_phy.data_width,
-            n_vectors  = 2048,
+            n_vectors  = self.MSIX_VECTORS,
         )
 
         self.msix_pba = LitePCIeMSIXPBA(
             phy        = self.pcie_phy,
             data_width = self.pcie_phy.data_width,
-            n_vectors  = 2048,
+            n_vectors  = self.MSIX_VECTORS,
         )
 
         # PASID Prefix Injector ---------------------------------------------------
