@@ -15,7 +15,7 @@ TOPLEVEL = tb_integration
 
 # Python test modules (comma-separated for cocotb)
 # COCOTB_TEST_MODULES = test_registers
-COCOTB_TEST_MODULES = test_registers,test_ats,test_monitor,test_intx
+COCOTB_TEST_MODULES = test_registers,test_ats,test_monitor,test_intx,test_random
 
 # Verilator-specific options
 ifeq ($(SIM),verilator)
@@ -35,7 +35,45 @@ $(VERILOG_SOURCES): tb_integration.py
 	@# Copy memory init files to working directory for simulator
 	@cp -f build/sim/*.init . 2>/dev/null || true
 
+# =============================================================================
+# Randomized Testing Convenience Targets
+# =============================================================================
+
+# Run all randomized tests with a time-based seed
+.PHONY: random
+random:
+	RANDOM_SEED=$$(date +%s) $(MAKE) sim TESTCASE=test_random_bar0,test_random_bar0_rapid,test_random_bar1_rw,test_random_attributes,test_backpressure_stress,test_tag_range,test_random_msix_table,test_dma_buffer_boundaries,test_completion_timeout_recovery
+
+# Run randomized tests with a specific seed for reproduction
+.PHONY: random-seed
+random-seed:
+ifndef SEED
+	$(error SEED is not set. Usage: make random-seed SEED=12345)
+endif
+	RANDOM_SEED=$(SEED) $(MAKE) sim TESTCASE=test_random_bar0,test_random_bar0_rapid,test_random_bar1_rw,test_random_attributes,test_backpressure_stress,test_tag_range
+
+# Run stress tests only
+.PHONY: stress
+stress:
+	RANDOM_SEED=$$(date +%s) $(MAKE) sim TESTCASE=test_backpressure_stress,test_random_bar0_rapid,test_completion_timeout_recovery
+
+# Generate and display coverage report
+.PHONY: coverage-report
+coverage-report:
+	@if [ -f coverage_random.json ]; then \
+		python3 -c "import sys; sys.path.insert(0, '..'); from common.coverage import CoverageCollector; c = CoverageCollector(); c.load('coverage_random.json'); print(c.report())"; \
+	else \
+		echo "No coverage data found. Run tests first with: make sim TESTCASE=test_random_bar0"; \
+	fi
+
+# Reset coverage and run fresh
+.PHONY: coverage-reset
+coverage-reset:
+	RESET_COVERAGE=1 $(MAKE) random
+
+# =============================================================================
 # Clean target
+# =============================================================================
 clean::
 	rm -rf build/
 	rm -rf __pycache__/
@@ -43,3 +81,5 @@ clean::
 	rm -rf results.xml
 	rm -rf *.fst
 	rm -rf *.init
+	rm -rf coverage_random.json
+	rm -rf coverage_random.txt

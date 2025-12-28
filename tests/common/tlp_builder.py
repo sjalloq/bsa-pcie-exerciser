@@ -417,3 +417,41 @@ class TLPBuilder:
         tlp_type = (header_dw0 >> 24) & 0x1F
 
         return (fmt, tlp_type, has_pasid)
+
+    @staticmethod
+    def extract_attr_from_tlp(beats):
+        """
+        Extract TLP attributes (No-Snoop, Relaxed Ordering, AT) from header.
+
+        Args:
+            beats: List of beat dicts from captured TLP
+
+        Returns:
+            Tuple of (attr, at) where:
+            - attr: 2-bit attribute field [1]=Relaxed Ordering, [0]=No Snoop
+            - at: 2-bit address type field
+        """
+        if not beats:
+            return (0, 0)
+
+        dw0 = beats[0]['dat'] & 0xFFFFFFFF
+        attr = (dw0 >> 12) & 0x3  # bits [13:12]
+        at = (dw0 >> 10) & 0x3    # bits [11:10]
+        return (attr, at)
+
+    @staticmethod
+    def extract_tag_from_mrd(beats):
+        """
+        Extract tag from a Memory Read TLP.
+
+        Args:
+            beats: List of beat dicts from captured TLP
+
+        Returns:
+            Tag value from the TLP header, or None if beats is empty.
+        """
+        if not beats:
+            return None
+        # DW1 is in upper 32 bits of beat 0
+        dw1 = (beats[0]['dat'] >> 32) & 0xFFFFFFFF
+        return (dw1 >> 8) & 0xFF

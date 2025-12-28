@@ -1,27 +1,22 @@
 [*]
-[*] GTKWave Analyzer v3.3.122 (w)1999-2024 BSI
-[*] Thu Dec 25 22:25:38 2025
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Sat Dec 27 20:18:14 2025
 [*]
 [dumpfile] "/home/sjalloq/git/bsa-pcie-exerciser/tests/integration/dump.fst"
-[dumpfile_mtime] "Thu Dec 25 22:19:05 2025"
-[dumpfile_size] 24580
+[dumpfile_mtime] "Sat Dec 27 20:17:32 2025"
+[dumpfile_size] 42406
 [savefile] "/home/sjalloq/git/bsa-pcie-exerciser/tests/integration/waves.gtkw"
-[timestart] 61000
+[timestart] 0
 [size] 1440 805
 [pos] -1 -1
-*-16.408010 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-20.165030 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [sst_width] 367
-[signals_width] 286
+[signals_width] 446
 [sst_expanded] 1
 [sst_vpaned_height] 228
 @28
 tb_integration.sys_clk
 tb_integration.pcie_clk
-tb_integration.testbench_bsa_regs_bus_cyc
-tb_integration.testbench_bsa_regs_bus_stb
-tb_integration.testbench_bsa_regs_bus_err
-@22
-tb_integration.testbench_bsa_regs_bus_adr[31:0]
 @800200
 -PHY Rx
 @22
@@ -36,17 +31,48 @@ tb_integration.phy_rx_be[7:0]
 tb_integration.phy_rx_dat[63:0]
 @1000200
 -PHY Rx
-@800201
+@800200
 -PHY Tx
-@29
+@28
 tb_integration.phy_tx_valid
 tb_integration.phy_tx_ready
 tb_integration.phy_tx_first
 tb_integration.phy_tx_last
-@23
+@22
 tb_integration.phy_tx_be[7:0]
 tb_integration.phy_tx_dat[63:0]
-@1000201
+@1000200
 -PHY Tx
+@800200
+-Header Extractor
+@28
+tb_integration.testbench_depacketizer_header_extracter_sink_valid
+tb_integration.testbench_depacketizer_header_extracter_sink_ready
+tb_integration.testbench_depacketizer_header_extracter_sink_first
+tb_integration.testbench_depacketizer_header_extracter_sink_last
+@1000200
+-Header Extractor
+@800200
+-Wishbone Regs
+@28
+tb_integration.testbench_bsa_regs_bus_cyc
+tb_integration.testbench_bsa_regs_bus_stb
+tb_integration.testbench_bsa_regs_bus_ack
+tb_integration.testbench_bsa_regs_bus_we
+@22
+tb_integration.testbench_bsa_regs_bus_adr[31:0]
+@28
+tb_integration.testbench_bsa_regs_bus_bte[1:0]
+@22
+tb_integration.testbench_bsa_regs_bus_sel[3:0]
+tb_integration.testbench_bsa_regs_bus_dat_w[31:0]
+@28
+tb_integration.testbench_bsa_regs_bus_cti[2:0]
+@22
+tb_integration.testbench_bsa_regs_bus_dat_r[31:0]
+@28
+tb_integration.testbench_bsa_regs_bus_err
+@1000200
+-Wishbone Regs
 [pattern_trace] 1
 [pattern_trace] 0
