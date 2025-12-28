@@ -98,7 +98,7 @@ def log_seed(dut, seed: int, test_name: str):
 async def test_random_bar0(dut):
     """
     Randomized BAR0 register access.
-    
+
     Exercises:
     - All valid register offsets
     - Random tag values
@@ -107,18 +107,18 @@ async def test_random_bar0(dut):
     """
     test_name = "test_random_bar0"
     seed = RANDOM_SEED
-    
+
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
     cocotb.start_soon(Clock(dut.pcie_clk, 10, unit="ns").start())
-    
+
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
-    
+
     rand = TLPRandomizer(seed=seed, constraints=BAR0_REGISTER_CONSTRAINTS)
     cov = get_coverage()
-    
+
     log_seed(dut, seed, test_name)
-    
+
     # Valid register offsets (from BSARegisters)
     valid_offsets = [
         REG_MSICTL,
@@ -142,7 +142,7 @@ async def test_random_bar0(dut):
         REG_DMACTL: DMACTL_WRITE_MASK,
         REG_ATSCTL: ATSCTL_WRITE_MASK,
     }
-    
+
     success = 0
     timeouts = 0
     tag_errors = 0
@@ -301,7 +301,7 @@ async def test_random_bar0_rapid(dut):
 async def test_random_bar1_rw(dut):
     """
     Randomized BAR1 buffer read/write with verification.
-    
+
     Exercises:
     - Various buffer offsets
     - Different data patterns
@@ -310,27 +310,27 @@ async def test_random_bar1_rw(dut):
     """
     test_name = "test_random_bar1_rw"
     seed = RANDOM_SEED + 200
-    
+
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
     cocotb.start_soon(Clock(dut.pcie_clk, 10, unit="ns").start())
-    
+
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
-    
+
     rand = TLPRandomizer(seed=seed, constraints=BAR1_BUFFER_CONSTRAINTS)
     cov = get_coverage()
-    
+
     log_seed(dut, seed, test_name)
-    
+
     # Track written data for verification
     written_data = {}
-    
+
     # Write phase
     n_writes = min(N_TRANSACTIONS // 2, 50)
     for i in range(n_writes):
         params = rand.generate_mwr_params()
         offset = params['address'] & 0x3FF8  # QWORD align within 16KB
-        
+
         # Use exactly 8 bytes, pad if needed
         data_bytes = params['data'][:8]
         if len(data_bytes) < 8:
@@ -339,23 +339,23 @@ async def test_random_bar1_rw(dut):
         expected_low = int.from_bytes(data_bytes[0:4], 'big')
         expected_high = int.from_bytes(data_bytes[4:8], 'big')
         data_int = (expected_high << 32) | expected_low
-        
+
         beats = TLPBuilder.memory_write_32(
-            offset, 
+            offset,
             data_bytes,
             tag=params['tag'],
             attr=params['attr'],
         )
         await bfm.inject_tlp(beats, bar_hit=0b000010)  # BAR1
-        
+
         written_data[offset] = data_int
         cov.sample_tlp('MWr', params)
         cov.sample('bar1_offset_written', offset >> 3)  # QWORD index
-        
+
         await ClockCycles(dut.sys_clk, rand.random_delay(2, 6))
-    
+
     dut._log.info(f"Wrote {n_writes} locations to BAR1")
-    
+
     # Verify phase - random subset
     n_verify = min(20, len(written_data))
     offsets_to_verify = rand.rng.sample(list(written_data.keys()), n_verify)
@@ -572,26 +572,26 @@ async def test_random_attributes(dut):
 async def test_backpressure_stress(dut):
     """
     Stress test with random back-pressure on TX path.
-    
+
     Verifies DUT handles flow control correctly.
     """
     test_name = "test_backpressure_stress"
     seed = RANDOM_SEED + 400
-    
+
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
     cocotb.start_soon(Clock(dut.pcie_clk, 10, unit="ns").start())
-    
+
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
-    
+
     rand = TLPRandomizer(seed=seed)
     cov = get_coverage()
-    
+
     log_seed(dut, seed, test_name)
-    
+
     # Back-pressure driver coroutine
     bp_active = True
-    
+
     async def backpressure_driver():
         """Randomly toggle TX ready to create back-pressure."""
         nonlocal bp_active
@@ -602,10 +602,10 @@ async def test_backpressure_stress(dut):
                 await ClockCycles(dut.sys_clk, rand.rng.randint(1, 5))
             dut.phy_tx_ready.value = 1
             await ClockCycles(dut.sys_clk, rand.rng.randint(1, 8))
-    
+
     # Start back-pressure driver
     bp_task = cocotb.start_soon(backpressure_driver())
-    
+
     # Valid register offsets for reads
     valid_offsets = [
         REG_MSICTL, REG_INTXCTL, REG_DMACTL, REG_DMA_OFFSET,
@@ -717,7 +717,7 @@ async def test_random_msix_table(dut):
     Randomized MSI-X table read/write with verification.
 
     Exercises:
-    - Random vector indices (0-2047)
+    - Random vector indices (0-15)
     - All four entry fields (addr_lo, addr_hi, data, control)
     - Read-after-write verification
     - Random tags
@@ -745,7 +745,7 @@ async def test_random_msix_table(dut):
     # Note: Only use QWORD-aligned offsets (0x00, 0x08) since the MSI-X table
     # expects upper DWORD writes (0x04, 0x0C) to use last_be instead of first_be
     for i in range(n_writes):
-        vector = rand.rng.randint(0, 255)  # Use subset of vectors for test
+        vector = rand.rng.randint(0, 15)  # All 16 vectors (0-15)
         field_offset = rand.rng.choice([MSIX_ADDR_LO, MSIX_DATA])  # QWORD-aligned only
         tag = rand.random_tag()
 
