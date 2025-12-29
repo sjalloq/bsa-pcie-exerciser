@@ -135,8 +135,10 @@ class BSARegisters(LiteXModule):
         self.rid_override_value = Signal(16)
 
         # Transaction monitor interface
-        self.txn_enable     = Signal()
-        self.txn_clear      = Signal()
+        self.txn_enable     = Signal()      # Output: enable capture
+        self.txn_clear      = Signal()      # Output: clear FIFO (pulse)
+        self.txn_overflow   = Signal()      # Input: overflow occurred (sticky)
+        self.txn_count      = Signal(8)     # Input: transaction count in FIFO
         self.txn_fifo_data  = Signal(32)
         self.txn_fifo_valid = Signal()
         self.txn_fifo_read  = Signal()
@@ -148,6 +150,18 @@ class BSARegisters(LiteXModule):
         # Extract word-aligned address (drop lower 2 bits for 32-bit regs)
         reg_addr = Signal(10)
         self.comb += reg_addr.eq(self.bus.adr[:10] & 0x3FC)  # Mask to register offsets
+
+        # TXN_CTRL composed read value:
+        # [0]=enable, [1]=0 (clear is W1C), [2]=overflow (RO), [15:8]=count (RO)
+        txn_ctrl_read = Signal(32)
+        self.comb += txn_ctrl_read.eq(Cat(
+            self.txn_ctrl[0],           # [0] = enable
+            Constant(0, 1),             # [1] = clear (always reads 0)
+            self.txn_overflow,          # [2] = overflow (RO)
+            Constant(0, 5),             # [7:3] = reserved
+            self.txn_count,             # [15:8] = count (RO)
+            Constant(0, 16),            # [31:16] = reserved
+        ))
 
         # Read data mux
         read_data = Signal(32)
@@ -169,7 +183,7 @@ class BSARegisters(LiteXModule):
                 REG_ATS_PERM:       read_data.eq(self.ats_perm),
                 REG_RID_CTL:        read_data.eq(self.rid_ctl),
                 REG_TXN_TRACE:      read_data.eq(self.txn_trace),
-                REG_TXN_CTRL:       read_data.eq(self.txn_ctrl),
+                REG_TXN_CTRL:       read_data.eq(txn_ctrl_read),
                 REG_ID:             read_data.eq(self.id),
                 "default":          read_data.eq(0),
             }),

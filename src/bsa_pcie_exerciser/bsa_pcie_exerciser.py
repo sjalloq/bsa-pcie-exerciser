@@ -482,6 +482,9 @@ class BSAExerciserSoC(SoCMini):
             self.bsa_regs.txn_fifo_data.eq(self.txn_monitor.fifo_data),
             self.bsa_regs.txn_fifo_valid.eq(~self.txn_monitor.fifo_empty),
             self.txn_monitor.fifo_read.eq(self.bsa_regs.txn_fifo_read),
+            # Overflow and count status
+            self.bsa_regs.txn_overflow.eq(self.txn_monitor.overflow),
+            self.bsa_regs.txn_count.eq(self.txn_monitor.count),
         ]
 
         # Legacy INTx Controller ---------------------------------------------------

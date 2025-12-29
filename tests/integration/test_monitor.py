@@ -32,7 +32,11 @@ from tests.common.tlp_builder import TLPBuilder
 # =============================================================================
 
 REG_TXN_TRACE = 0x40   # Transaction FIFO read data (RO)
-REG_TXN_CTRL  = 0x44   # Transaction control: [0]=enable, [1]=clear (W1C)
+REG_TXN_CTRL  = 0x44   # Transaction control:
+                       #   [0] = enable (R/W)
+                       #   [1] = clear (W1C, always reads 0)
+                       #   [2] = overflow (RO, sticky until clear)
+                       #   [15:8] = count (RO, transactions in FIFO)
 
 
 # =============================================================================
@@ -96,6 +100,23 @@ async def read_bar0_register(bfm, offset, tag=0):
     # Extract data from completion (big-endian wire format)
     raw_data = (cpl[1]['dat'] >> 32) & 0xFFFFFFFF
     return int.from_bytes(raw_data.to_bytes(4, 'big'), 'little')
+
+
+async def read_txn_ctrl_status(bfm, tag=0):
+    """
+    Read TXN_CTRL and extract status fields.
+
+    Returns:
+        Dict with 'enable', 'overflow', 'count' fields, or None on error.
+    """
+    value = await read_bar0_register(bfm, REG_TXN_CTRL, tag=tag)
+    if value is None:
+        return None
+    return {
+        'enable': (value >> 0) & 0x1,
+        'overflow': (value >> 2) & 0x1,
+        'count': (value >> 8) & 0xFF,
+    }
 
 
 async def read_fifo_transaction(bfm):
@@ -450,3 +471,622 @@ async def test_monitor_fifo_clear(dut):
 
     dut._log.info("FIFO cleared successfully")
     dut._log.info("test_monitor_fifo_clear PASSED")
+
+
+# =============================================================================
+# Monitor Byte Enable Capture Tests
+# =============================================================================
+
+@cocotb.test(timeout_time=100, timeout_unit="us")
+async def test_monitor_captures_first_be_partial(dut):
+    """
+    Verify monitor captures partial first_be values correctly.
+
+    Tests various first_be patterns to ensure they are captured in the FIFO.
+    This is required for BSA ACS e022 compliance verification.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    # Test cases: (first_be, description)
+    # For single DWORD TLPs, any first_be pattern is valid per PCIe spec
+    test_cases = [
+        (0x1, "byte 0 only"),
+        (0x2, "byte 1 only"),
+        (0x3, "bytes 0-1"),
+        (0x4, "byte 2 only"),
+        (0x5, "bytes 0,2 (non-contiguous)"),
+        (0x6, "bytes 1-2"),
+        (0x7, "bytes 0-2"),
+        (0x8, "byte 3 only"),
+        (0x9, "bytes 0,3 (non-contiguous)"),
+        (0xA, "bytes 1,3 (non-contiguous)"),
+        (0xC, "bytes 2-3"),
+        (0xE, "bytes 1-3"),
+        (0xF, "all bytes"),
+    ]
+
+    for first_be, desc in test_cases:
+        dut._log.info(f"--- Testing first_be=0x{first_be:X} ({desc}) ---")
+
+        # Enable and clear FIFO
+        await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+        await ClockCycles(bfm.clk, 5)
+        await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+        await ClockCycles(bfm.clk, 5)
+
+        # Inject write with specific first_be
+        test_write = TLPBuilder.memory_write_32(
+            address=0x100,
+            data_bytes=b'\xAA\xBB\xCC\xDD',
+            requester_id=0x0100,
+            tag=0x40,
+            first_be=first_be,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)  # BAR1
+        await ClockCycles(bfm.clk, 20)
+
+        # Read captured transaction
+        txn = await read_fifo_transaction(bfm)
+
+        if txn is None:
+            raise AssertionError(f"No transaction captured for first_be=0x{first_be:X}")
+
+        dut._log.info(f"Captured: first_be=0x{txn['first_be']:X}, last_be=0x{txn['last_be']:X}")
+
+        if txn['first_be'] == first_be:
+            dut._log.info(f"PASS: first_be=0x{first_be:X} captured correctly")
+        else:
+            raise AssertionError(
+                f"first_be mismatch!\n"
+                f"  Expected: 0x{first_be:X} ({desc})\n"
+                f"  Got:      0x{txn['first_be']:X}"
+            )
+
+    dut._log.info("test_monitor_captures_first_be_partial PASSED")
+
+
+@cocotb.test(timeout_time=100, timeout_unit="us")
+async def test_monitor_captures_multi_dword_be(dut):
+    """
+    Verify monitor captures first_be and last_be for multi-DWORD writes.
+
+    For multi-DWORD TLPs, both first_be and last_be should be non-zero.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    # Test cases: (first_be, last_be, num_dwords, description)
+    test_cases = [
+        (0xF, 0xF, 2, "full 2 DWORDs"),
+        (0x3, 0xC, 2, "lower first, upper last"),
+        (0xF, 0x1, 2, "full first, byte 0 last"),
+        (0x8, 0xF, 2, "byte 3 first, full last"),
+    ]
+
+    for first_be, last_be, num_dwords, desc in test_cases:
+        dut._log.info(f"--- Testing {desc}: first_be=0x{first_be:X}, last_be=0x{last_be:X} ---")
+
+        # Enable and clear FIFO
+        await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+        await ClockCycles(bfm.clk, 5)
+        await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+        await ClockCycles(bfm.clk, 5)
+
+        # Inject multi-DWORD write
+        data_bytes = bytes([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])
+        test_write = TLPBuilder.memory_write_32(
+            address=0x200,
+            data_bytes=data_bytes,
+            requester_id=0x0100,
+            tag=0x50,
+            first_be=first_be,
+            last_be=last_be,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)  # BAR1
+        await ClockCycles(bfm.clk, 20)
+
+        # Read captured transaction
+        txn = await read_fifo_transaction(bfm)
+
+        if txn is None:
+            raise AssertionError(f"No transaction captured for {desc}")
+
+        dut._log.info(f"Captured: len={txn['length']}, first_be=0x{txn['first_be']:X}, last_be=0x{txn['last_be']:X}")
+
+        assert txn['length'] == num_dwords, \
+            f"Length mismatch: expected {num_dwords}, got {txn['length']}"
+        assert txn['first_be'] == first_be, \
+            f"first_be mismatch: expected 0x{first_be:X}, got 0x{txn['first_be']:X}"
+        assert txn['last_be'] == last_be, \
+            f"last_be mismatch: expected 0x{last_be:X}, got 0x{txn['last_be']:X}"
+
+        dut._log.info(f"PASS: {desc}")
+
+    dut._log.info("test_monitor_captures_multi_dword_be PASSED")
+
+
+@cocotb.test(timeout_time=100, timeout_unit="us")
+async def test_monitor_captures_read_first_be(dut):
+    """
+    Verify monitor captures first_be for Memory Read TLPs.
+
+    Memory reads also have first_be/last_be to indicate which bytes are requested.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    # Test cases for reads
+    test_cases = [
+        (0xF, "full DWORD"),
+        (0x3, "lower 2 bytes"),
+        (0xC, "upper 2 bytes"),
+        (0x1, "byte 0 only"),
+    ]
+
+    for first_be, desc in test_cases:
+        dut._log.info(f"--- Testing read first_be=0x{first_be:X} ({desc}) ---")
+
+        # Enable and clear FIFO
+        await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+        await ClockCycles(bfm.clk, 5)
+        await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+        await ClockCycles(bfm.clk, 5)
+
+        # Inject read with specific first_be
+        test_read = TLPBuilder.memory_read_32(
+            address=0x300,
+            length_dw=1,
+            requester_id=0x0100,
+            tag=0x60,
+            first_be=first_be,
+        )
+        await bfm.inject_tlp(test_read, bar_hit=0b000010)  # BAR1
+
+        # Wait for processing and consume completion
+        await ClockCycles(bfm.clk, 20)
+        await bfm.capture_tlp(timeout_cycles=200)
+
+        # Read captured transaction
+        txn = await read_fifo_transaction(bfm)
+
+        if txn is None:
+            raise AssertionError(f"No transaction captured for read first_be=0x{first_be:X}")
+
+        dut._log.info(f"Captured: we={txn['we']}, first_be=0x{txn['first_be']:X}")
+
+        assert txn['we'] == 0, "Expected read (we=0)"
+        assert txn['first_be'] == first_be, \
+            f"first_be mismatch: expected 0x{first_be:X}, got 0x{txn['first_be']:X}"
+
+        dut._log.info(f"PASS: read first_be=0x{first_be:X}")
+
+    dut._log.info("test_monitor_captures_read_first_be PASSED")
+
+
+@cocotb.test(timeout_time=100, timeout_unit="us")
+async def test_monitor_be_zero_handling(dut):
+    """
+    Verify monitor correctly captures first_be=0 (no bytes enabled).
+
+    Per PCIe spec, first_be=0 is valid for zero-length reads.
+    This tests edge case handling.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    # Enable and clear FIFO
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+    await ClockCycles(bfm.clk, 5)
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+    await ClockCycles(bfm.clk, 5)
+
+    # Inject write with first_be=0 (unusual but valid)
+    test_write = TLPBuilder.memory_write_32(
+        address=0x400,
+        data_bytes=b'\x00\x00\x00\x00',
+        requester_id=0x0100,
+        tag=0x70,
+        first_be=0x0,
+    )
+    await bfm.inject_tlp(test_write, bar_hit=0b000010)  # BAR1
+    await ClockCycles(bfm.clk, 20)
+
+    # Read captured transaction
+    txn = await read_fifo_transaction(bfm)
+
+    if txn is None:
+        raise AssertionError("No transaction captured for first_be=0x0")
+
+    dut._log.info(f"Captured: first_be=0x{txn['first_be']:X}, last_be=0x{txn['last_be']:X}")
+
+    assert txn['first_be'] == 0x0, \
+        f"first_be mismatch: expected 0x0, got 0x{txn['first_be']:X}"
+
+    dut._log.info("test_monitor_be_zero_handling PASSED")
+
+
+# =============================================================================
+# Monitor FIFO Overflow Tests
+# =============================================================================
+
+# FIFO depth is 32 transactions (BSA spec maximum) per bsa_pcie_exerciser.py
+# Note: BAR0 register accesses (TXN_CTRL reads/writes) are also captured!
+
+@cocotb.test(timeout_time=500, timeout_unit="us")
+async def test_monitor_fifo_overflow_stops_capture(dut):
+    """
+    Verify FIFO stops accepting transactions when full and sets overflow flag.
+
+    When the FIFO reaches capacity, subsequent transactions should be dropped
+    and the overflow flag should be set. The count field should accurately
+    reflect the number of transactions buffered.
+
+    Note: The monitor captures ALL transactions including BAR0 register accesses,
+    so we account for this in our calculations.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    FIFO_DEPTH = 32  # Actual depth from bsa_pcie_exerciser.py
+    OVERFLOW_COUNT = 5
+
+    dut._log.info(f"Testing FIFO overflow: injecting {FIFO_DEPTH + OVERFLOW_COUNT} transactions to BAR1")
+
+    # Enable capture and clear
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+    await ClockCycles(bfm.clk, 5)
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+    await ClockCycles(bfm.clk, 5)
+
+    # Inject transactions with distinct data patterns (to BAR1)
+    # These are pure writes, no reads needed, so only these get captured
+    for i in range(FIFO_DEPTH + OVERFLOW_COUNT):
+        data_pattern = 0x10000000 | (i << 16) | i
+        test_write = TLPBuilder.memory_write_32(
+            address=0x100 + (i * 4),
+            data_bytes=data_pattern.to_bytes(4, 'little'),
+            requester_id=0x0100,
+            tag=i,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)  # BAR1
+        await ClockCycles(bfm.clk, 5)
+
+    dut._log.info("All transactions injected, checking status")
+
+    # Check status after overflow (this read will be captured too)
+    status = await read_txn_ctrl_status(bfm, tag=0xA1)
+    assert status is not None, "Failed to read TXN_CTRL after overflow"
+    dut._log.info(f"After overflow: enable={status['enable']}, overflow={status['overflow']}, count={status['count']}")
+
+    # Verify overflow flag is set (we injected FIFO_DEPTH + OVERFLOW_COUNT = 37 txns)
+    assert status['overflow'] == 1, "Overflow flag should be set after exceeding capacity"
+
+    # Verify count is at maximum (FIFO_DEPTH)
+    assert status['count'] == FIFO_DEPTH, \
+        f"Count should be {FIFO_DEPTH}, got {status['count']}"
+
+    # Read all captured transactions
+    captured_count = 0
+    first_txn = None
+
+    for i in range(FIFO_DEPTH + 10):  # Try to read more than we expect
+        txn = await read_fifo_transaction(bfm)
+        if txn is None:
+            break
+        captured_count += 1
+        if first_txn is None:
+            first_txn = txn
+        if i < 5:  # Log first few
+            dut._log.info(f"Transaction {i}: addr=0x{txn['address']:08X}, data=0x{txn['data_lo']:08X}")
+
+    dut._log.info(f"Captured {captured_count} transactions from FIFO")
+
+    # Verify we captured exactly FIFO_DEPTH transactions
+    assert captured_count == FIFO_DEPTH, \
+        f"Expected {FIFO_DEPTH} captured transactions, got {captured_count}"
+
+    # Verify first transaction has expected data (wasn't overwritten)
+    if first_txn is not None:
+        expected_addr = 0x100
+        expected_data = 0x10000000
+        assert first_txn['address'] == expected_addr, \
+            f"First transaction address corrupted: got 0x{first_txn['address']:08X}"
+        assert first_txn['data_lo'] == expected_data, \
+            f"First transaction data corrupted: got 0x{first_txn['data_lo']:08X}"
+
+    # Verify overflow flag is still set (sticky) - this read also captured
+    status = await read_txn_ctrl_status(bfm, tag=0xA2)
+    assert status['overflow'] == 1, "Overflow flag should remain set (sticky)"
+
+    dut._log.info("PASS: FIFO correctly stopped at capacity, overflow flag set")
+    dut._log.info("test_monitor_fifo_overflow_stops_capture PASSED")
+
+
+@cocotb.test(timeout_time=500, timeout_unit="us")
+async def test_monitor_fifo_overflow_recovery(dut):
+    """
+    Verify FIFO and overflow flag are cleared together, allowing recovery.
+
+    After overflow, the clear bit should:
+    1. Empty the FIFO
+    2. Clear the sticky overflow flag
+    3. Allow new transactions to be captured
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    FIFO_DEPTH = 32  # Actual depth from bsa_pcie_exerciser.py
+
+    dut._log.info("Filling FIFO to capacity and causing overflow")
+
+    # Enable capture and clear
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+    await ClockCycles(bfm.clk, 5)
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+    await ClockCycles(bfm.clk, 5)
+
+    # Fill FIFO completely + overflow
+    for i in range(FIFO_DEPTH + 5):
+        test_write = TLPBuilder.memory_write_32(
+            address=0x200 + (i * 4),
+            data_bytes=b'\xAA\xBB\xCC\xDD',
+            requester_id=0x0100,
+            tag=i & 0xFF,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)
+        await ClockCycles(bfm.clk, 3)
+
+    # Disable capture before reading status (so reads aren't captured)
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x00)
+    await ClockCycles(bfm.clk, 5)
+
+    # Verify overflow is set
+    status = await read_txn_ctrl_status(bfm, tag=0xB0)
+    dut._log.info(f"Before clear: overflow={status['overflow']}, count={status['count']}")
+    assert status['overflow'] == 1, "Overflow should be set after exceeding capacity"
+    assert status['count'] == FIFO_DEPTH, f"Count should be {FIFO_DEPTH}"
+
+    dut._log.info("Clearing FIFO and overflow flag")
+
+    # Clear FIFO (this should also clear overflow), keep disabled
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x02)  # Clear only, stay disabled
+    await ClockCycles(bfm.clk, 10)
+
+    # Verify FIFO is empty and overflow is cleared
+    status = await read_txn_ctrl_status(bfm, tag=0xB1)
+    dut._log.info(f"After clear: overflow={status['overflow']}, count={status['count']}")
+    assert status['overflow'] == 0, "Overflow should be cleared after clear"
+    assert status['count'] == 0, "Count should be 0 after clear"
+
+    # Re-enable capture for new transactions
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)  # Enable
+    await ClockCycles(bfm.clk, 5)
+
+    dut._log.info("Injecting new transactions after recovery")
+
+    # Inject new transactions
+    for i in range(5):
+        data_pattern = 0x55000000 | i
+        test_write = TLPBuilder.memory_write_32(
+            address=0x300 + (i * 4),
+            data_bytes=data_pattern.to_bytes(4, 'little'),
+            requester_id=0x0100,
+            tag=0x80 + i,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)
+        await ClockCycles(bfm.clk, 5)
+
+    # Disable capture before verifying
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x00)
+    await ClockCycles(bfm.clk, 5)
+
+    # Verify count reflects new transactions
+    # TXN_CTRL writes are excluded from capture, so only BAR1 writes are counted
+    status = await read_txn_ctrl_status(bfm, tag=0xB2)
+    dut._log.info(f"After new txns: overflow={status['overflow']}, count={status['count']}")
+    assert status['count'] == 5, f"Count should be 5 (BAR1 writes only), got {status['count']}"
+    assert status['overflow'] == 0, "Overflow should still be 0"
+
+    # Verify all 5 BAR1 transactions were captured
+    for i in range(5):
+        txn = await read_fifo_transaction(bfm)
+        assert txn is not None, f"Expected transaction {i}"
+        assert txn['bar_hit'] == 0b010, f"Expected BAR1 hit, got {txn['bar_hit']:03b}"
+    dut._log.info("All 5 BAR1 transactions captured correctly")
+
+    dut._log.info("PASS: FIFO and overflow recovered after clear")
+    dut._log.info("test_monitor_fifo_overflow_recovery PASSED")
+
+
+@cocotb.test(timeout_time=500, timeout_unit="us")
+async def test_monitor_fifo_overflow_lockout(dut):
+    """
+    Verify that overflow lockout prevents new captures until clear.
+
+    Once overflow is set, no new transactions should be captured even if
+    there is space in the FIFO (after reads). The lockout persists until
+    the clear bit is written.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    FIFO_DEPTH = 32  # Actual depth from bsa_pcie_exerciser.py
+
+    dut._log.info("Testing overflow lockout behavior")
+
+    # Enable capture and clear
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)
+    await ClockCycles(bfm.clk, 5)
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)
+    await ClockCycles(bfm.clk, 5)
+
+    # Fill FIFO and cause overflow
+    dut._log.info(f"Filling FIFO with {FIFO_DEPTH + 2} transactions (overflow by 2)")
+    for i in range(FIFO_DEPTH + 2):
+        data_pattern = 0x11110000 | i
+        test_write = TLPBuilder.memory_write_32(
+            address=0x400 + (i * 4),
+            data_bytes=data_pattern.to_bytes(4, 'little'),
+            requester_id=0x0100,
+            tag=i & 0xFF,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)
+        await ClockCycles(bfm.clk, 3)
+
+    # Verify overflow is set (overflow lockout prevents new captures even with enable=1)
+    status = await read_txn_ctrl_status(bfm, tag=0xC0)
+    dut._log.info(f"After overflow: overflow={status['overflow']}, count={status['count']}")
+    assert status['overflow'] == 1, "Overflow should be set"
+    assert status['count'] == FIFO_DEPTH, f"Count should be {FIFO_DEPTH}"
+
+    # Read out half the transactions (creates space, but lockout should prevent new captures)
+    dut._log.info("Reading 16 transactions to create space")
+    for i in range(16):
+        txn = await read_fifo_transaction(bfm)
+        assert txn is not None, f"Expected transaction {i}"
+
+    # Verify count decreased but overflow still set
+    # Note: reads while in overflow lockout shouldn't be captured
+    status = await read_txn_ctrl_status(bfm, tag=0xC1)
+    dut._log.info(f"After partial read: overflow={status['overflow']}, count={status['count']}")
+    assert status['overflow'] == 1, "Overflow should still be set (sticky)"
+    assert status['count'] == 16, f"Count should be 16 after reading 16, got {status['count']}"
+
+    # Try to inject more transactions (should be dropped due to lockout)
+    dut._log.info("Injecting transactions while locked out (should be dropped)")
+    for i in range(4):
+        data_pattern = 0x22220000 | i
+        test_write = TLPBuilder.memory_write_32(
+            address=0x500 + (i * 4),
+            data_bytes=data_pattern.to_bytes(4, 'little'),
+            requester_id=0x0100,
+            tag=0x80 + i,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)
+        await ClockCycles(bfm.clk, 5)
+
+    # Verify count is unchanged (lockout prevented captures)
+    status = await read_txn_ctrl_status(bfm, tag=0xC2)
+    dut._log.info(f"After lockout inject: overflow={status['overflow']}, count={status['count']}")
+    assert status['count'] == 16, f"Count should still be 16 (lockout), got {status['count']}"
+
+    # Clear and disable before checking state
+    dut._log.info("Clearing overflow and verifying normal operation")
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x02)  # Clear only, stay disabled
+    await ClockCycles(bfm.clk, 10)
+
+    status = await read_txn_ctrl_status(bfm, tag=0xC3)
+    assert status['overflow'] == 0, "Overflow should be cleared"
+    assert status['count'] == 0, "Count should be 0 after clear"
+    dut._log.info(f"After clear: overflow={status['overflow']}, count={status['count']}")
+
+    # Re-enable for new captures
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x01)  # Enable
+    await ClockCycles(bfm.clk, 5)
+
+    # Inject new transactions (should be captured now)
+    dut._log.info("Injecting transactions after clear (should be captured)")
+    for i in range(4):
+        data_pattern = 0x33330000 | i
+        test_write = TLPBuilder.memory_write_32(
+            address=0x600 + (i * 4),
+            data_bytes=data_pattern.to_bytes(4, 'little'),
+            requester_id=0x0100,
+            tag=0x90 + i,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)
+        await ClockCycles(bfm.clk, 5)
+
+    # Disable before checking (TXN_CTRL writes are NOT captured)
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x00)
+    await ClockCycles(bfm.clk, 5)
+
+    status = await read_txn_ctrl_status(bfm, tag=0xC4)
+    dut._log.info(f"After post-clear inject: overflow={status['overflow']}, count={status['count']}")
+    # TXN_CTRL writes are excluded from capture, so only BAR1 writes are counted
+    assert status['count'] == 4, f"Count should be 4 (BAR1 writes only), got {status['count']}"
+
+    dut._log.info("PASS: Overflow lockout correctly prevented captures until clear")
+    dut._log.info("test_monitor_fifo_overflow_lockout PASSED")
+
+
+@cocotb.test(timeout_time=200, timeout_unit="us")
+async def test_monitor_count_tracking(dut):
+    """
+    Verify count field accurately tracks transactions as they're added and read.
+
+    Key insight: Disable capture before reading TXN_CTRL/TXN_TRACE so those
+    reads don't pollute the count.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
+
+    bfm = PCIeBFM(dut)
+    await reset_dut(dut)
+
+    dut._log.info("Testing count field tracking")
+
+    # Enable capture and clear
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)  # Clear + enable
+    await ClockCycles(bfm.clk, 5)
+
+    # Inject 5 transactions
+    dut._log.info("Injecting 5 transactions to BAR1")
+    for i in range(5):
+        test_write = TLPBuilder.memory_write_32(
+            address=0x100 + (i * 4),
+            data_bytes=(0x11110000 | i).to_bytes(4, 'little'),
+            requester_id=0x0100,
+            tag=i,
+        )
+        await bfm.inject_tlp(test_write, bar_hit=0b000010)
+        await ClockCycles(bfm.clk, 5)
+
+    # Disable capture before checking count
+    # Note: TXN_CTRL writes go directly to registers, not through PCIe depacketizer,
+    # so they are NOT captured by the monitor
+    await write_bar0_register(bfm, REG_TXN_CTRL, 0x00)  # Disable
+    await ClockCycles(bfm.clk, 5)
+
+    # Now check count - should be exactly 5 (only BAR1 writes captured)
+    status = await read_txn_ctrl_status(bfm, tag=0xD0)
+    dut._log.info(f"After injecting 5 writes: count={status['count']}")
+    assert status['count'] == 5, f"Count should be 5, got {status['count']}"
+
+    # Read 3 transactions from FIFO (capture still disabled)
+    dut._log.info("Reading 3 transactions from FIFO")
+    for i in range(3):
+        txn = await read_fifo_transaction(bfm)
+        assert txn is not None, f"Expected transaction {i}"
+
+    # Check count decreased to 2 (was 5, read 3)
+    status = await read_txn_ctrl_status(bfm, tag=0xE0)
+    dut._log.info(f"After reading 3 transactions: count={status['count']}")
+    assert status['count'] == 2, f"Count should be 2, got {status['count']}"
+
+    # Read remaining 2 transactions
+    for i in range(2):
+        txn = await read_fifo_transaction(bfm)
+        assert txn is not None, f"Expected transaction {i}"
+
+    # Verify count is 0
+    status = await read_txn_ctrl_status(bfm, tag=0xE1)
+    dut._log.info(f"After reading all: count={status['count']}")
+    assert status['count'] == 0, f"Count should be 0, got {status['count']}"
+
+    dut._log.info("PASS: Count field correctly tracks transaction flow")
+    dut._log.info("test_monitor_count_tracking PASSED")

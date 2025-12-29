@@ -53,7 +53,8 @@ class TLPBuilder:
     """Helper class for building TLP packets."""
 
     @staticmethod
-    def memory_write_32(address, data_bytes, requester_id=0x0100, tag=0, attr=0, at=0):
+    def memory_write_32(address, data_bytes, requester_id=0x0100, tag=0, attr=0, at=0,
+                        first_be=None, last_be=None):
         """
         Build 32-bit Memory Write TLP.
 
@@ -64,6 +65,8 @@ class TLPBuilder:
             tag: 8-bit tag
             attr: 2-bit attribute field [1]=Relaxed Ordering, [0]=No Snoop
             at: 2-bit address type (0=untranslated, 1=trans req, 2=translated)
+            first_be: 4-bit byte enable for first DWORD (default: 0xF)
+            last_be: 4-bit byte enable for last DWORD (default: 0xF or 0x0)
 
         Returns:
             List of beat dicts with 'dat' and 'be' keys
@@ -75,9 +78,11 @@ class TLPBuilder:
                ((attr & 0x3) << 12) | ((at & 0x3) << 10) | (length & 0x3FF))
 
         # DW1: Requester ID, Tag, Last BE, First BE
-        first_be = 0xF
-        last_be = 0xF if length > 1 else 0x0
-        dw1 = (requester_id << 16) | (tag << 8) | (last_be << 4) | first_be
+        if first_be is None:
+            first_be = 0xF
+        if last_be is None:
+            last_be = 0xF if length > 1 else 0x0
+        dw1 = (requester_id << 16) | (tag << 8) | ((last_be & 0xF) << 4) | (first_be & 0xF)
 
         # DW2: Address (lower 2 bits must be 0)
         dw2 = address & 0xFFFFFFFC
@@ -111,7 +116,8 @@ class TLPBuilder:
         return beats
 
     @staticmethod
-    def memory_read_32(address, length_dw, requester_id=0x0100, tag=0, attr=0, at=0):
+    def memory_read_32(address, length_dw, requester_id=0x0100, tag=0, attr=0, at=0,
+                       first_be=None, last_be=None):
         """
         Build 32-bit Memory Read TLP.
 
@@ -122,6 +128,8 @@ class TLPBuilder:
             tag: 8-bit tag
             attr: 2-bit attribute field [1]=Relaxed Ordering, [0]=No Snoop
             at: 2-bit address type (0=untranslated, 1=trans req, 2=translated)
+            first_be: 4-bit byte enable for first DWORD (default: 0xF)
+            last_be: 4-bit byte enable for last DWORD (default: 0xF or 0x0)
 
         Returns:
             List of beat dicts with 'dat' and 'be' keys
@@ -130,9 +138,11 @@ class TLPBuilder:
         dw0 = ((0b000 << 29) | (0b00000 << 24) |
                ((attr & 0x3) << 12) | ((at & 0x3) << 10) | (length_dw & 0x3FF))
 
-        first_be = 0xF
-        last_be = 0xF if length_dw > 1 else 0x0
-        dw1 = (requester_id << 16) | (tag << 8) | (last_be << 4) | first_be
+        if first_be is None:
+            first_be = 0xF
+        if last_be is None:
+            last_be = 0xF if length_dw > 1 else 0x0
+        dw1 = (requester_id << 16) | (tag << 8) | ((last_be & 0xF) << 4) | (first_be & 0xF)
 
         dw2 = address & 0xFFFFFFFC
 

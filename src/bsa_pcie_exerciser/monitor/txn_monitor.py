@@ -48,16 +48,25 @@ class TransactionMonitor(LiteXModule):
 
     Interface signals (directly wired to BSARegisters):
         - enable (input): Enable transaction capture
-        - clear (input): Clear FIFO (pulse)
+        - clear (input): Clear FIFO and overflow (pulse)
+        - overflow (output): Sticky flag, set when transaction dropped due to full FIFO
+        - count (output): Number of transactions currently in FIFO
         - fifo_data (output): 32-bit FIFO read data
         - fifo_empty (output): FIFO empty flag
         - fifo_read (input): Read next word from FIFO
+
+    Overflow Behavior:
+        When the FIFO is full and a new transaction arrives, the overflow flag
+        is set and the transaction is dropped. Once overflow is set, no further
+        transactions are captured until software writes the clear bit. This
+        ensures software is aware that transactions were lost.
     """
 
     def __init__(self, data_width, fifo_depth=16):
         assert data_width >= 64, "Minimum 64-bit data width"
 
         self.data_width = data_width
+        self.fifo_depth = fifo_depth
 
         # =====================================================================
         # Tap Interface (connects to depacketizer.req_source)
@@ -84,7 +93,14 @@ class TransactionMonitor(LiteXModule):
         # =====================================================================
 
         self.enable     = Signal()      # Enable capture
-        self.clear      = Signal()      # Clear FIFO (pulse)
+        self.clear      = Signal()      # Clear FIFO and overflow (pulse)
+
+        # =====================================================================
+        # Status Interface (to BSARegisters)
+        # =====================================================================
+
+        self.overflow   = Signal()      # Sticky overflow flag (RO)
+        self.count      = Signal(8)     # Transaction count in FIFO (RO)
 
         # =====================================================================
         # FIFO Read Interface (to BSARegisters)
@@ -160,16 +176,45 @@ class TransactionMonitor(LiteXModule):
         capture_entry = Signal(entry_width)
         self.comb += capture_entry.eq(Cat(word0, word1, word2, word3, word4))
 
-        # Capture on first beat of valid transaction when enabled
-        do_capture = Signal()
+        # Overflow detection and lockout
+        # Once overflow is set, no further captures until clear
         fifo_full = Signal()
+        overflow_reg = Signal()
+        txn_arriving = Signal()
+        txn_dropped = Signal()
+
+        # Exclude TXN_CTRL register (BAR0 offset 0x44) from capture.
+        # This prevents enable/disable writes from polluting the trace,
+        # which is required for BSA ACS test compatibility.
+        REG_TXN_CTRL = 0x044
+        is_txn_ctrl = Signal()
+        self.comb += is_txn_ctrl.eq(
+            self.tap_bar_hit[0] & (self.tap_adr[:12] == REG_TXN_CTRL)
+        )
+
         self.comb += [
             fifo_full.eq(count == fifo_depth),
+            txn_arriving.eq(self.enable & self.tap_valid & self.tap_first & ~is_txn_ctrl),
+            txn_dropped.eq(txn_arriving & (fifo_full | overflow_reg)),
+            self.overflow.eq(overflow_reg),
+        ]
+
+        # Capture on first beat of valid transaction when enabled and not in overflow
+        do_capture = Signal()
+        self.comb += [
             do_capture.eq(
-                self.enable &
-                self.tap_valid &
-                self.tap_first &
-                ~fifo_full
+                txn_arriving &
+                ~fifo_full &
+                ~overflow_reg
+            ),
+        ]
+
+        # Overflow register - sticky until clear
+        self.sync += [
+            If(self.clear,
+                overflow_reg.eq(0),
+            ).Elif(txn_dropped,
+                overflow_reg.eq(1),
             ),
         ]
 
@@ -261,3 +306,6 @@ class TransactionMonitor(LiteXModule):
             ),
             # If both happen simultaneously, count stays the same
         ]
+
+        # Export count to status interface (truncate to 8 bits)
+        self.comb += self.count.eq(count[:8])
