@@ -12,6 +12,4 @@ sim_build/
 __pycache__
 *.egg-info
 
-external/
-
 vivado.*

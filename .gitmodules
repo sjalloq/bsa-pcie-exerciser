@@ -1,0 +1,13 @@
+[submodule "external/litepcie"]
+	path = external/litepcie
+	url = https://github.com/sjalloq/litepcie
+	branch = feature/tlp-attributes
+[submodule "external/sysarch-acs"]
+	path = external/sysarch-acs
+	url = https://github.com/ARM-software/sysarch-acs.git
+[submodule "external/pcileech-fpga"]
+	path = external/pcileech-fpga
+	url = https://github.com/ufrisk/pcileech-fpga.git
+[submodule "external/pcie_screamer"]
+	path = external/pcie_screamer
+	url = https://github.com/enjoy-digital/pcie_screamer.git
