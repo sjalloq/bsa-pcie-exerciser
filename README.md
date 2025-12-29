@@ -1,97 +1,112 @@
 # BSA PCIe Exerciser
 
-ARM BSA/SBSA PCIe Exerciser implementation using LiteX/LitePCIe framework.
+An FPGA-based PCIe endpoint for ARM Base System Architecture (BSA) compliance testing.
 
 ## Overview
 
-This exerciser implements the ARM Base System Architecture (BSA) PCIe exerciser
-specification for compliance testing. It enables validation of:
+The BSA PCIe Exerciser is a hardware test device that plugs into a PCIe slot on an ARM64 system under test. It implements the [ARM BSA Exerciser specification](https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md) and works with the [ARM BSA ACS](https://github.com/ARM-software/sysarch-acs) (Architecture Compliance Suite) to validate:
 
 - SMMU/IOMMU functionality via configurable TLP attributes
-- Cache coherency via No-Snoop attribute control
-- Address translation via PASID and ATS support
-- Interrupt handling via MSI/MSI-X generation
-- Transaction monitoring for compliance verification
+- Cache coherency through No-Snoop attribute control
+- Address translation using ATS and PASID
+- MSI-X interrupt handling (2048 vectors)
 
-## Repository Structure
+The exerciser is software-controlled: BSA ACS tests write to device registers to trigger specific PCIe transactions, then verify the system handled them correctly.
 
-```
-bsa-exerciser/
-├── README.md
-├── requirements.txt              # Python dependencies
-├── setup_env.sh                  # Environment setup script
-│
-├── bsa_exerciser/               # Core exerciser IP
-│   ├── __init__.py
-│   ├── dma.py                   # BSA DMA engine (register-triggered)
-│   ├── regs.py                  # BAR0 register bank
-│   ├── msi.py                   # MSI/MSI-X trigger logic
-│   ├── monitor.py               # Transaction monitor
-│   └── core.py                  # Top-level integration
-│
-├── targets/                      # Board-specific builds
-│   └── spec_a7.py               # SPEC-A7 target
-│
-├── software/                     # Host-side tools
-│   ├── test_exerciser.py        # Python test utility
-│   └── linux/                   # Linux driver (if needed)
-│
-├── verify/                       # Verification
-│   ├── Makefile
-│   ├── generate_verilog.py
-│   └── tb/
-│       ├── bfm/
-│       └── test_*.py
-│
-└── docs/                         # Documentation
-    ├── IMPLEMENTATION_PLAN.md
-    ├── REGISTER_MAP.md
-    └── VERIFICATION.md
-```
+## Supported Hardware
 
-## Dependencies
+### FPGA Platforms
 
-- **LitePCIe fork** with attribute passthrough support
-- LiteX framework
-- Migen
-- Python 3.8+
+| Board | FPGA | PCIe | Status |
+|-------|------|------|--------|
+| SPEC-A7 | Artix-7 XC7A50T | Gen2 x1 | Supported |
+| CaptainDMA / Squirrel | Artix-7 XC7A35T | Gen2 x1 | Planned |
 
-## Quick Start
+### Host System Requirements
+
+- **Architecture**: AArch64 (ARM64)
+- **PCIe slot**: x1 or wider, Gen2 capable
+- **IOMMU**: ARM SMMU recommended for full test coverage
+- **OS**: Linux with BSA ACS kernel module support
+
+## Building
+
+### Prerequisites
+
+- Xilinx Vivado 2023.x or later
+- Python 3.10+
+- OpenFPGALoader (for JTAG programming)
+
+### Build Steps
 
 ```bash
-# 1. Clone this repo
-git clone <this-repo>
-cd bsa-exerciser
+# Clone repository
+git clone https://github.com/your-org/bsa-pcie-exerciser.git
+cd bsa-pcie-exerciser
 
-# 2. Set up Python environment
-./setup_env.sh
+# Set up environment
+source sourceme
 
-# 3. Clone and patch LitePCIe fork
-git clone https://github.com/<your-org>/litepcie.git deps/litepcie
-# Apply patches per docs/LITEPCIE_PATCHES.md
-
-# 4. Build for SPEC-A7
-python targets/spec_a7.py --build
-
-# 5. Run verification
-cd verify && make test
+# Build bitstream for your target board
+make build PLATFORM=spec_a7
 ```
 
-## Implementation Status
+Build outputs are placed in `build/<platform>/gateware/`.
 
-| Feature | Status | Phase |
-|---------|--------|-------|
-| BAR0 Registers | 🔲 TODO | 1 |
-| Basic DMA (read/write) | 🔲 TODO | 1 |
-| No-Snoop attribute | 🔲 TODO | 1 |
-| MSI-X generation | 🔲 TODO | 1 |
-| Transaction monitor | 🔲 TODO | 1 |
-| PASID TLP prefix | 🔲 TODO | 2 |
-| ATS (AT field) | 🔲 TODO | 3 |
-| ATS completions + ATC | 🔲 TODO | 3 |
+## Installation
 
-## References
+### Programming the FPGA
 
-- [ARM BSA ACS](https://github.com/ARM-software/sysarch-acs)
-- [Exerciser Spec](https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md)
-- [LitePCIe](https://github.com/enjoy-digital/litepcie)
+With the board connected via JTAG:
+
+```bash
+# Program volatile (lost on power cycle)
+bsa-pcie-exerciser --load
+
+# Program flash (persistent)
+bsa-pcie-exerciser --flash
+```
+
+### Physical Installation
+
+1. Power off the system under test
+2. Install the programmed FPGA board in a PCIe slot
+3. Power on and boot to Linux
+
+### Verifying Enumeration
+
+The exerciser should appear as a PCIe device:
+
+```bash
+lspci -d 1234:5678 -v
+```
+
+You should see the device with multiple BARs:
+- BAR0: Control registers
+- BAR2: DMA buffer space
+
+## Running BSA Tests
+
+The exerciser integrates with ARM's BSA ACS test suite. Once the device is installed and enumerated:
+
+1. Build and load the BSA ACS UEFI application or Linux module
+2. The ACS automatically detects exerciser devices
+3. Run the PCIe exerciser test groups
+
+Refer to the [BSA ACS documentation](https://github.com/ARM-software/sysarch-acs) for detailed test execution instructions.
+
+## Documentation
+
+- [Project Documentation](docs/source/) — Architecture, register maps, and implementation details
+- [ARM BSA Exerciser Specification](https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md) — Official specification this project implements
+- [ARM BSA Specification](https://developer.arm.com/documentation/den0094/latest) — Base System Architecture requirements
+
+## Related Projects
+
+- [ARM BSA ACS](https://github.com/ARM-software/sysarch-acs) — The compliance test suite that uses this exerciser
+- [LiteX](https://github.com/enjoy-digital/litex) — SoC builder framework
+- [LitePCIe](https://github.com/enjoy-digital/litepcie) — PCIe core for LiteX
+
+## License
+
+BSD 3-Clause License. See [LICENSE](LICENSE) for details.
