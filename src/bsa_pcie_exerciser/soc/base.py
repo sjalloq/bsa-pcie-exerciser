@@ -375,6 +375,7 @@ class BSAExerciserSoC(SoCMini):
         self.comb += [
             self.ats_invalidation.atc_valid.eq(self.atc.valid),
             self.ats_invalidation.atc_input_addr.eq(self.atc._input_addr),
+            self.ats_invalidation.atc_input_addr_end.eq(self.atc._input_addr_end),
             self.ats_invalidation.atc_range_size.eq(self.atc._range_size),
             self.ats_invalidation.atc_pasid_valid.eq(self.atc._pasid_valid),
             self.ats_invalidation.atc_pasid_val.eq(self.atc._pasid_val),

@@ -78,8 +78,9 @@ class ATC(LiteXModule):
         self.valid = Signal()
 
         # Input address range
-        self._input_addr  = Signal(64)
-        self._range_size  = Signal(32)
+        self._input_addr     = Signal(64)
+        self._range_size     = Signal(32)
+        self._input_addr_end = Signal(64)  # Precomputed: input_addr + range_size - 1
 
         # Output (translated) address
         self._output_addr = Signal(64)
@@ -127,15 +128,12 @@ class ATC(LiteXModule):
         # Lookup Logic
         # =====================================================================
 
-        # Calculate input address range end
-        input_addr_end = Signal(64)
-        self.comb += input_addr_end.eq(self._input_addr + self._range_size - 1)
-
         # Check if lookup address is in range
+        # Uses precomputed _input_addr_end (computed at store time)
         addr_in_range = Signal()
         self.comb += addr_in_range.eq(
             (self.lookup_addr >= self._input_addr) &
-            (self.lookup_addr <= input_addr_end)
+            (self.lookup_addr <= self._input_addr_end)
         )
 
         # Check PASID match
@@ -178,6 +176,8 @@ class ATC(LiteXModule):
                 self._pasid_valid.eq(self.store_pasid_valid),
                 self._pasid_val.eq(self.store_pasid_val),
                 self.invalidated.eq(0),
+                # Precompute end address at store time to avoid combinational path
+                self._input_addr_end.eq(self.store_input_addr + self.store_range_size - 1),
             ).Else(
                 self.invalidated.eq(0),
             ),

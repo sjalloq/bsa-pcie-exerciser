@@ -97,12 +97,13 @@ class ATSInvalidationHandler(LiteXModule):
         # ATC Interface
         # =====================================================================
 
-        self.atc_valid      = Signal()
-        self.atc_input_addr = Signal(64)
-        self.atc_range_size = Signal(32)
-        self.atc_pasid_valid = Signal()
-        self.atc_pasid_val  = Signal(20)
-        self.atc_invalidate = Signal()
+        self.atc_valid          = Signal()
+        self.atc_input_addr     = Signal(64)
+        self.atc_input_addr_end = Signal(64)  # Precomputed from ATC
+        self.atc_range_size     = Signal(32)
+        self.atc_pasid_valid    = Signal()
+        self.atc_pasid_val      = Signal(20)
+        self.atc_invalidate     = Signal()
 
         # =====================================================================
         # ATS Engine Interface
@@ -141,17 +142,16 @@ class ATSInvalidationHandler(LiteXModule):
         inv_itag      = Signal(5)  # Invalidation tag for completion
 
         # Range overlap check
-        atc_end_addr = Signal(64)
+        # Uses precomputed atc_input_addr_end from ATC (computed at store time)
         inv_end_addr = Signal(64)
         ranges_overlap = Signal()
 
         self.comb += [
-            atc_end_addr.eq(self.atc_input_addr + self.atc_range_size - 1),
             inv_end_addr.eq(inv_addr + inv_size - 1),
             # Ranges overlap if: start1 <= end2 AND start2 <= end1
             ranges_overlap.eq(
                 (self.atc_input_addr <= inv_end_addr) &
-                (inv_addr <= atc_end_addr)
+                (inv_addr <= self.atc_input_addr_end)
             ),
         ]
 
