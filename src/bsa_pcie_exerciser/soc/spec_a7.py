@@ -9,6 +9,8 @@ from migen import *
 from litex.gen import *
 from litex.soc.cores.clock import S7PLL
 
+from bsa_pcie_exerciser.soc.base import BSAExerciserSoC
+
 
 class SPECA7CRG(LiteXModule):
     """
@@ -34,3 +36,16 @@ class SPECA7CRG(LiteXModule):
         pll.create_clkout(self.cd_sys, sys_clk_freq, margin=0)
 
         platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin)
+
+
+class SPECA7SoC(BSAExerciserSoC):
+    """
+    SPEC-A7 SoC.
+
+    Extends the base BSA Exerciser SoC with SPEC-A7 specific features.
+    Future: Ethernet support for CSR access and transaction streaming.
+    """
+
+    def __init__(self, platform, sys_clk_freq=125e6, **kwargs):
+        # Initialize base SoC with SPECA7CRG
+        super().__init__(platform, sys_clk_freq, crg_cls=SPECA7CRG, **kwargs)

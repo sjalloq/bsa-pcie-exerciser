@@ -96,16 +96,22 @@ def build(platform, output_dir):
     # Create platform
     platform_inst = config["Platform"](variant=config["variant"])
 
-    # Import SoC here to avoid circular imports
-    from bsa_pcie_exerciser.soc import BSAExerciserSoC
+    # Select SoC based on platform
+    if platform == "squirrel":
+        from bsa_pcie_exerciser.soc.squirrel import SquirrelSoC
+        SoC = SquirrelSoC
+    elif platform == "spec_a7":
+        from bsa_pcie_exerciser.soc.spec_a7 import SPECA7SoC
+        SoC = SPECA7SoC
+    else:
+        raise click.ClickException(f"No SoC defined for platform: {platform}")
 
     click.echo(f"Building for [bold green]{platform}[/] ({config['variant']})...")
 
-    # Create SoC
-    soc = BSAExerciserSoC(
+    # Create SoC (each platform SoC handles its own CRG)
+    soc = SoC(
         platform_inst,
         sys_clk_freq=int(config["sys_clk_freq"]),
-        crg_cls=config["CRG"],
     )
 
     # Build
