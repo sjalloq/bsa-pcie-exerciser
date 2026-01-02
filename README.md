@@ -1,111 +1,180 @@
 # BSA PCIe Exerciser
 
-An FPGA-based PCIe endpoint for ARM Base System Architecture (BSA) compliance testing.
+[![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Work_in_Progress-yellow.svg)]()
 
-## Overview
+> ⚠️ **Work in Progress** — This project is under active development. Hardware interfaces are functional but the full BSA test suite integration is incomplete.
 
-The BSA PCIe Exerciser is a hardware test device that plugs into a PCIe slot on an ARM64 system under test. It implements the [ARM BSA Exerciser specification](https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md) and works with the [ARM BSA ACS](https://github.com/ARM-software/sysarch-acs) (Architecture Compliance Suite) to validate:
+An open-source FPGA-based PCIe endpoint for [ARM BSA](https://developer.arm.com/documentation/den0094/latest) compliance testing. Plug it into an ARM64 system, run the [BSA ACS](https://github.com/ARM-software/sysarch-acs) test suite, and validate your SMMU/IOMMU, cache coherency, and interrupt handling.
 
-- SMMU/IOMMU functionality via configurable TLP attributes
-- Cache coherency through No-Snoop attribute control
-- Address translation using ATS and PASID
-- MSI-X interrupt handling (2048 vectors)
+## Architecture
 
-The exerciser is software-controlled: BSA ACS tests write to device registers to trigger specific PCIe transactions, then verify the system handled them correctly.
+The Arm BSA PCIe Exerciser is a PCIe endpoint designed for validation of an Arm BSA/SBSA compliant system.  The BSA/SBSA Architecture Compliance Suite, ACS, uses the exerciser to provide external stimulus and generate events that validate the PCIe Root Complex implementation on the test platform.
+
+The Exerciser feature set is described in the **sysarch-acs** documentation [here](https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md).
+
+The following block diagram shows the main functional blocks that make up the BSA PCIe Exerciser implemented in this repo.  Note that the USB interface is **not** an Arm BSA ACS requirement and provided for debug/monitoring only.
+
+```
+                      ┌───────────────────────────────────────────────────────────┐
+                      │                     PCIe Squirrel Board                   │
+                      │                                                           │
+                      │  ┌───────────┐      ┌──────────────────────────────────┐  │
+                      │  │           │      │       BSA Exerciser Core         │  │
+                      │  │  Xilinx   │      │                                  │  │
+  ARM64 System        │  │  PCIe     │      │  ┌───────┐ ┌───────┐ ┌────────┐  │  │
+  Under Test ─────────┼──┤  PHY      │◄────►│  │ BAR0  │ │  DMA  │ │ MSI-X  │  │  │
+  (PCIe x1)           │  │           │      │  │ Regs  │ │Engine │ │  INTx  │  │  │
+                      │  │  Gen2 x1  │      │  └───────┘ └───────┘ └────────┘  │  │
+                      │  │           │      │                                  │  │
+                      │  └───────────┘      │  ┌───────┐ ┌───────┐ ┌────────┐  │  │
+                      │                     │  │ PASID │ │  ATS  │ │Monitor │  │  │
+                      │                     │  │Prefix │ │ Cache │ │ FIFO   │  │  │
+                      │                     │  └───────┘ └───────┘ └───┬────┘  │  │
+                      │                     └──────────────────────────┼───────┘  │
+                      │                                                │          │
+                      │  ┌───────────┐       Transaction capture       │          │
+  Host PC ────────────┼──┤  FT601    │◄────────────────────────────────┘          │
+  (monitoring/debug)  │  │  USB 3.0  │                                            │
+  (USB 3.0)           │  └───────────┘                                            │
+                      │                                                           │
+                      └───────────────────────────────────────────────────────────┘
+
+```
+
+## Features
+
+- **DMA Engine** — Generate memory read/write TLPs with configurable No-Snoop and PASID attributes
+- **MSI-X Interrupts** — MSI-X vector table and legacy INTx support for interrupt testing
+- **PASID Support** — TLP prefix injection for process address space isolation testing
+- **ATS Cache** — Address Translation Services with translation request/completion handling
+- **Transaction Monitor** — Capture inbound TLPs and stream via USB 3.0 for host-side analysis
 
 ## Supported Hardware
 
-### FPGA Platforms
+| Board | FPGA | PCIe | USB Monitor | Status |
+|-------|------|------|-------------|--------|
+| **Squirrel** (PCIe Screamer) | Artix-7 XC7A35T | Gen2 x1 | FT601 USB 3.0 | Primary target |
+| SPEC-A7 | Artix-7 XC7A50T | Gen2 x1 | Ethernet | Supported |
 
-| Board | FPGA | PCIe | Status |
-|-------|------|------|--------|
-| SPEC-A7 | Artix-7 XC7A50T | Gen2 x1 | Supported |
-| CaptainDMA / Squirrel | Artix-7 XC7A35T | Gen2 x1 | Planned |
+The Squirrel (and similar PCILeech-derived boards like the CaptainDMA 4.1th) offers an excellent price/performance ratio for BSA testing. The FT601 USB interface enables real-time transaction monitoring without consuming PCIe bandwidth.
 
-### Host System Requirements
+### LambdaConcept PCIe Squirrel
 
-- **Architecture**: AArch64 (ARM64)
-- **PCIe slot**: x1 or wider, Gen2 capable
-- **IOMMU**: ARM SMMU recommended for full test coverage
-- **OS**: Linux with BSA ACS kernel module support
+The Squirrel is a low-profile form factor board designed to be used with the [PCILeech](https://github.com/ufrisk/pcileech) DMA attack software.  The PCILeech software and gateware are designed to be used for system security analysis and testing but the board provides a low cost solution to BSA testing.
 
-## Building
+![Squirrel](https://shop.lambdaconcept.com/168-large_default/screamer-pcie-squirrel.jpg)
 
-### Prerequisites
+The board is available directly from LambdaConcept on their [webshop](https://shop.lambdaconcept.com/home/50-screamer-pcie-squirrel.html) for €159.00.
 
-- Xilinx Vivado 2023.x or later
-- Python 3.10+
-- OpenFPGALoader (for JTAG programming)
+### CaptainDMA PCIe 4.1th
 
-### Build Steps
+CaptainDMA produce a wide variety of PCILeech supported boards and the 4.1th seems to be a direct replacement for the LambdaConcept Squirrel.  At the time of writing, the 4.1th is available from the CaptainDMA webshop for $99 [here](https://captaindma.com/product/captain-dma-4-1th/).
+
+![CaptainDMA](https://captaindma.com/wp-content/uploads/2023/09/captain-4.1.401-1.png.webp)
+
+### SPEC A7
+
+The SPEC A7 is a low cost White Rabbit node developed by the same teams behind the [Sinara](https://github.com/sinara-hw/meta/wiki) open-source hardware ecosystem used within ARTIQ.  The board is designed to be a low cost alternative to the main Ultrascale system boards and is available from TechnoSystem [here](https://sinara.technosystem.pl/modules/wr-node-spec-a7/).
+
+![Spec_A7](https://sinara.technosystem.pl/app/uploads/2025/06/TOP-Spec-A7-PCIe-Module-1024x576.png)
+
+The board is included here as it was the source of the LiteX PCIe SoC used as the baseline for this project.  You can find the original source code [here](https://github.com/enjoy-digital/litex_wr_nic).
+
+While the board is supported, the LamdaConcept Squirrel offers a much more attractive price point and is the recommended board.
+
+## Quick Start
+
+### 1. Get the Hardware
+
+You'll need a PCIe card such as the Squirrel or  and an ARM64 system with a free PCIe slot and SMMU enabled.
+
+### 2. Program the FPGA
+
+Download a pre-built bitstream from [Releases](https://github.com/sjalloq/bsa-pcie-exerciser/releases), or build from source:
 
 ```bash
-# Clone repository
-git clone https://github.com/your-org/bsa-pcie-exerciser.git
+git clone https://github.com/sjalloq/bsa-pcie-exerciser.git
 cd bsa-pcie-exerciser
-
-# Set up environment
 source sourceme
-
-# Build bitstream for your target board
-make build PLATFORM=spec_a7
+bsa-pcie-exerciser build --platform squirrel
 ```
 
-Build outputs are placed in `build/<platform>/gateware/`.
-
-## Installation
-
-### Programming the FPGA
-
-With the board connected via JTAG:
+Program via JTAG:
 
 ```bash
-# Program volatile (lost on power cycle)
-bsa-pcie-exerciser --load
-
-# Program flash (persistent)
-bsa-pcie-exerciser --flash
+bsa-pcie-exerciser load --platform squirrel
 ```
 
-### Physical Installation
+### 3. Install in Target System
 
-1. Power off the system under test
-2. Install the programmed FPGA board in a PCIe slot
-3. Power on and boot to Linux
+1. Power off the ARM64 system under test
+2. Insert the programmed Squirrel into a PCIe slot
+3. Connect USB cable to monitoring host (optional)
+4. Power on and boot
 
-### Verifying Enumeration
-
-The exerciser should appear as a PCIe device:
+### 4. Verify Enumeration
 
 ```bash
-lspci -d 1234:5678 -v
+# Should show the BSA Exerciser device
+lspci -d 13b5:00ed -v
 ```
 
-You should see the device with multiple BARs:
-- BAR0: Control registers
-- BAR2: DMA buffer space
+Expected output shows:
+- **BAR0**: Control/status registers
+- **BAR1**: DMA buffer
+- **BAR2/5**: MSI-X table and PBA
 
-## Running BSA Tests
+### 5. Run BSA Tests
 
-The exerciser integrates with ARM's BSA ACS test suite. Once the device is installed and enumerated:
+```bash
+# Using BSA ACS Linux application
+cd /path/to/bsa-acs
+./bsa -e          # Run exerciser tests
+```
 
-1. Build and load the BSA ACS UEFI application or Linux module
-2. The ACS automatically detects exerciser devices
-3. Run the PCIe exerciser test groups
+See the [BSA ACS documentation](https://github.com/ARM-software/sysarch-acs) for full test execution details.
 
-Refer to the [BSA ACS documentation](https://github.com/ARM-software/sysarch-acs) for detailed test execution instructions.
+## Transaction Monitoring
+
+The Squirrel's USB interface provides real-time visibility into PCIe transactions:
+
+```bash
+# On the monitoring host PC
+pip install bsa-monitor
+bsa-monitor capture --live
+```
+
+This streams all inbound TLPs with full header details (address, attributes, byte enables) — essential for debugging SMMU translation failures.
 
 ## Documentation
 
-- [Project Documentation](docs/source/) — Architecture, register maps, and implementation details
-- [ARM BSA Exerciser Specification](https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md) — Official specification this project implements
-- [ARM BSA Specification](https://developer.arm.com/documentation/den0094/latest) — Base System Architecture requirements
+Full documentation is available in the [docs/](docs/) directory:
+
+- [Architecture Overview](docs/source/architecture.rst)
+- [Register Map](docs/source/registers.rst)  
+- [Building from Source](docs/source/building.rst)
+- [USB Monitor Protocol](docs/source/usb_monitor.rst)
+
+## Project Status
+
+| Component | Status |
+|-----------|--------|
+| Multi-BAR routing | ✅ Complete |
+| DMA engine | ✅ Complete |
+| MSI-X (2048 vectors) | ✅ Complete |
+| PASID prefix injection | ✅ Complete |
+| ATS cache | ✅ Complete |
+| Transaction monitor | ✅ Complete |
+| USB streaming | 🔄 In progress |
+| BSA ACS integration | 🔄 In progress |
 
 ## Related Projects
 
-- [ARM BSA ACS](https://github.com/ARM-software/sysarch-acs) — The compliance test suite that uses this exerciser
+- [ARM BSA ACS](https://github.com/ARM-software/sysarch-acs) — Compliance test suite
 - [LiteX](https://github.com/enjoy-digital/litex) — SoC builder framework
-- [LitePCIe](https://github.com/enjoy-digital/litepcie) — PCIe core for LiteX
+- [LitePCIe](https://github.com/enjoy-digital/litepcie) — PCIe core (using [forked version](https://github.com/sjalloq/litepcie/tree/feature/tlp-attributes) with TLP attribute support)
+- [LiteX WR NIC](https://github.com/enjoy-digital/litex_wr_nic) - PCIe White Rabbit NIC
 
 ## License
 
