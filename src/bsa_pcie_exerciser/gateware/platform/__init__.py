@@ -9,5 +9,5 @@
 # to avoid importing hardware-specific dependencies unnecessarily.
 #
 # Usage:
-#   from bsa_pcie_exerciser.platform.spec_a7 import Platform
-#   from bsa_pcie_exerciser.platform.squirrel import Platform
+#   from bsa_pcie_exerciser.gateware.platform.spec_a7 import Platform
+#   from bsa_pcie_exerciser.gateware.platform.squirrel import Platform

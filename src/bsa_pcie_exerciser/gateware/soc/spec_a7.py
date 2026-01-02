@@ -9,7 +9,7 @@ from migen import *
 from litex.gen import *
 from litex.soc.cores.clock import S7PLL
 
-from bsa_pcie_exerciser.soc.base import BSAExerciserSoC
+from bsa_pcie_exerciser.gateware.soc.base import BSAExerciserSoC
 
 
 class SPECA7CRG(LiteXModule):

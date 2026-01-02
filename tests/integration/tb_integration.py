@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from tests.common.platform import TestPlatform
 from tests.common.phy_stub import PHYStub
 
-from bsa_pcie_exerciser.soc import BSAExerciserSoC
+from bsa_pcie_exerciser.gateware.soc import BSAExerciserSoC
 
 
 # =============================================================================

@@ -14,7 +14,7 @@ from litex.gen import *
 from litex.soc.interconnect import stream
 
 from .layouts import HEADER_WORDS
-from bsa_pcie_exerciser.usb.core import usb_channel_description
+from ..core import usb_channel_description
 
 
 # Default USB channel for monitor

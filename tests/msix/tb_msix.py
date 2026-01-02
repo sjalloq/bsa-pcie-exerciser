@@ -126,7 +126,7 @@ class MSIXTestbench(LiteXModule):
         # Import MSI-X modules here to avoid circular imports
         # =====================================================================
 
-        from bsa_pcie_exerciser.msix.table import LitePCIeMSIXTable, LitePCIeMSIXPBA
+        from bsa_pcie_exerciser.gateware.msix.table import LitePCIeMSIXTable, LitePCIeMSIXPBA
 
         # =====================================================================
         # MSI-X Table (BAR2)

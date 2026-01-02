@@ -17,7 +17,7 @@ from litex.soc.integration.soc_core import SoCMini
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.frontend.wishbone import LitePCIeWishboneBridge
 
-from bsa_pcie_exerciser.core import (
+from bsa_pcie_exerciser.gateware.core import (
     LitePCIeBARDispatcher,
     LitePCIeCompletionArbiter,
     LitePCIeMasterArbiter,
@@ -27,22 +27,22 @@ from bsa_pcie_exerciser.core import (
     INTxController,
 )
 
-from bsa_pcie_exerciser.dma import (
+from bsa_pcie_exerciser.gateware.dma import (
     BSADMABuffer,
     BSADMABufferHandler,
     BSADMAEngine,
 )
 
-from bsa_pcie_exerciser.monitor import TransactionMonitor
+from bsa_pcie_exerciser.gateware.monitor import TransactionMonitor
 
-from bsa_pcie_exerciser.msix import (
+from bsa_pcie_exerciser.gateware.msix import (
     LitePCIeMSIXTable,
     LitePCIeMSIXPBA,
     LitePCIeMSIXController,
 )
 
-from bsa_pcie_exerciser.pasid import PASIDPrefixInjector
-from bsa_pcie_exerciser.ats import ATSEngine, ATC, ATSInvalidationHandler
+from bsa_pcie_exerciser.gateware.pasid import PASIDPrefixInjector
+from bsa_pcie_exerciser.gateware.ats import ATSEngine, ATC, ATSInvalidationHandler
 
 
 class BSAExerciserSoC(SoCMini):

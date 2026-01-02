@@ -11,8 +11,8 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 from litex.gen import *
 from litex.soc.cores.clock import S7PLL
 
-from bsa_pcie_exerciser.soc.base import BSAExerciserSoC
-from bsa_pcie_exerciser.usb import FT601Sync, USBCore, Etherbone, USBMonitorSubsystem
+from bsa_pcie_exerciser.gateware.soc.base import BSAExerciserSoC
+from bsa_pcie_exerciser.gateware.usb import FT601Sync, USBCore, Etherbone, USBMonitorSubsystem
 
 
 class SquirrelCRG(LiteXModule):

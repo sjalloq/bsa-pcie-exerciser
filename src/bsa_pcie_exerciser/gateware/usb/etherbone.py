@@ -23,7 +23,7 @@ from litex.soc.interconnect.packet import (
     Header, HeaderField, Packetizer, Depacketizer, Arbiter, Dispatcher, PacketFIFO
 )
 
-from bsa_pcie_exerciser.usb.core import usb_channel_description
+from .core import usb_channel_description
 
 
 # =============================================================================

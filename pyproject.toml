@@ -35,31 +35,41 @@ classifiers = [
     "Topic :: System :: Hardware",
 ]
 
+# Base install: host tools only (no gateware dependencies)
 dependencies = [
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# Gateware build dependencies (FPGA synthesis)
+gateware = [
     "rich-click>=1.7",
     "migen @ git+https://github.com/m-labs/migen.git@4c2ae8dfeea37f235b52acb8166f12acaaae4f7c",
     "litex @ git+https://github.com/enjoy-digital/litex.git@2025.08",
     "litepcie @ git+https://github.com/sjalloq/litepcie.git@feature/tlp-attributes",
 ]
-
-[project.optional-dependencies]
 dev = [
+    "bsa-pcie-exerciser[gateware]",
     "pytest>=7.0",
     "cocotb>=1.8",
     "cocotb-test",
     "repopack",
 ]
 docs = [
-  "sphinx",
-  "sphinx-rtd-theme",
-  "sphinx-rtd-size",
-  "sphinxcontrib-images",
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx-rtd-size",
+    "sphinxcontrib-images",
 ]
 all = [
     "bsa-pcie-exerciser[dev,docs]",
 ]
 
 [project.scripts]
+# Host tools (base install)
+bsa-monitor = "bsa_pcie_exerciser.tools.cli:main"
+# Gateware build CLI (requires [gateware])
 bsa-pcie-exerciser = "bsa_pcie_exerciser.bsa_pcie_exerciser:main"
 
 [project.urls]

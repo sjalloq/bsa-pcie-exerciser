@@ -19,16 +19,16 @@ from litex.soc.integration.builder import Builder
 PLATFORMS = {
     "spec_a7": {
         "description": "SPEC-A7 (XC7A35T)",
-        "platform_module": "bsa_pcie_exerciser.platform.spec_a7",
-        "crg_module": "bsa_pcie_exerciser.soc.spec_a7",
+        "platform_module": "bsa_pcie_exerciser.gateware.platform.spec_a7",
+        "crg_module": "bsa_pcie_exerciser.gateware.soc.spec_a7",
         "crg_class": "SPECA7CRG",
         "variant": "xc7a35t",
         "sys_clk_freq": 125e6,
     },
     "squirrel": {
         "description": "Squirrel/CaptainDMA (XC7A35T)",
-        "platform_module": "bsa_pcie_exerciser.platform.squirrel",
-        "crg_module": "bsa_pcie_exerciser.soc.squirrel",
+        "platform_module": "bsa_pcie_exerciser.gateware.platform.squirrel",
+        "crg_module": "bsa_pcie_exerciser.gateware.soc.squirrel",
         "crg_class": "SquirrelCRG",
         "variant": "xc7a35t",
         "sys_clk_freq": 125e6,
@@ -98,10 +98,10 @@ def build(platform, output_dir):
 
     # Select SoC based on platform
     if platform == "squirrel":
-        from bsa_pcie_exerciser.soc.squirrel import SquirrelSoC
+        from bsa_pcie_exerciser.gateware.soc.squirrel import SquirrelSoC
         SoC = SquirrelSoC
     elif platform == "spec_a7":
-        from bsa_pcie_exerciser.soc.spec_a7 import SPECA7SoC
+        from bsa_pcie_exerciser.gateware.soc.spec_a7 import SPECA7SoC
         SoC = SPECA7SoC
     else:
         raise click.ClickException(f"No SoC defined for platform: {platform}")

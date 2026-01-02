@@ -18,7 +18,7 @@ from .capture import TLPCaptureEngine
 from .async_fifo import MonitorHeaderFIFO, MonitorPayloadFIFO
 from .arbiter import MonitorPacketArbiter
 
-from bsa_pcie_exerciser.usb.core import usb_channel_description
+from ..core import usb_channel_description
 
 
 class USBMonitorSubsystem(LiteXModule):

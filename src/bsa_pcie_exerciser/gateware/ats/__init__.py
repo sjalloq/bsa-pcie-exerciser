@@ -7,9 +7,9 @@
 # Address Translation Services (ATS) support.
 #
 
-from bsa_pcie_exerciser.ats.engine import ATSEngine
-from bsa_pcie_exerciser.ats.atc import ATC
-from bsa_pcie_exerciser.ats.invalidation import ATSInvalidationHandler
+from .engine import ATSEngine
+from .atc import ATC
+from .invalidation import ATSInvalidationHandler
 
 __all__ = [
     "ATSEngine",

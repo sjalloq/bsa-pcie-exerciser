@@ -49,7 +49,7 @@ class DMATestbench(LiteXModule):
         # Import DMA modules
         # =====================================================================
 
-        from bsa_pcie_exerciser.dma import BSADMABuffer, BSADMABufferHandler, BSADMAEngine
+        from bsa_pcie_exerciser.gateware.dma import BSADMABuffer, BSADMABufferHandler, BSADMAEngine
 
         # =====================================================================
         # DMA Buffer (shared between handler and engine)

@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
-from bsa_pcie_exerciser.pasid.prefix_injector import PASIDPrefixInjector
+from .prefix_injector import PASIDPrefixInjector
 
 __all__ = [
     "PASIDPrefixInjector",

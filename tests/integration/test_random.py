@@ -41,7 +41,7 @@ from tests.common.randomizer import (
 from tests.common.coverage import get_coverage, CoverageCollector
 
 # Import register offset constants from BSA registers module
-from bsa_pcie_exerciser.core.bsa_registers import (
+from bsa_pcie_exerciser.gateware.core.bsa_registers import (
     REG_MSICTL, REG_INTXCTL, REG_DMACTL, REG_DMA_OFFSET,
     REG_DMA_BUS_ADDR_LO, REG_DMA_BUS_ADDR_HI, REG_DMA_LEN, REG_DMASTATUS,
     REG_PASID_VAL, REG_ATSCTL, REG_RID_CTL, REG_TXN_CTRL, REG_ID,
