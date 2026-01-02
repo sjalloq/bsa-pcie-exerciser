@@ -125,8 +125,12 @@ class ATC(LiteXModule):
         # # #
 
         # =====================================================================
-        # Lookup Logic
+        # Lookup Logic (Pipelined)
         # =====================================================================
+        # Lookup is pipelined: inputs on cycle N, outputs valid on cycle N+1.
+        # This breaks the long combinatorial path through 64-bit comparisons
+        # and arithmetic. The DMA engine's SETUP state provides the required
+        # cycle of latency.
 
         # Check if lookup address is in range
         # Uses precomputed _input_addr_end (computed at store time)
@@ -145,17 +149,24 @@ class ATC(LiteXModule):
              (self._pasid_val == self.lookup_pasid_val))
         )
 
-        # Lookup hit
-        self.comb += [
-            self.lookup_hit.eq(self.valid & addr_in_range & pasid_match),
-        ]
+        # Combinatorial hit (before pipeline register)
+        atc_hit = Signal()
+        self.comb += atc_hit.eq(self.valid & addr_in_range & pasid_match)
 
-        # Calculate translated address
+        # Calculate translated address (combinatorial)
         # Output = output_addr + (lookup_addr - input_addr)
         offset = Signal(64)
+        lookup_output = Signal(64)
         self.comb += [
             offset.eq(self.lookup_addr - self._input_addr),
-            self.lookup_output.eq(self._output_addr + offset),
+            lookup_output.eq(self._output_addr + offset),
+        ]
+
+        # Pipeline register for lookup outputs
+        # This breaks the critical timing path
+        self.sync += [
+            self.lookup_hit.eq(atc_hit),
+            self.lookup_output.eq(lookup_output),
             self.lookup_perm.eq(self._permissions),
         ]
 

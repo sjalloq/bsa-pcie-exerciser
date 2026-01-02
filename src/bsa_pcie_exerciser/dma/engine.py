@@ -167,6 +167,12 @@ class BSADMAEngine(LiteXModule):
         # Drive lookup_addr for top-level to use with ATC lookup interface.
         # The top-level connects this to atc.lookup_addr along with PASID signals,
         # and returns the hit result and translated address.
+        #
+        # TIMING: The ATC has a 1-cycle pipeline - lookup_addr on cycle N yields
+        # lookup_hit/lookup_output on cycle N+1. The SETUP state provides this
+        # latency: current_addr is stable during SETUP, ATC computes and registers
+        # the result, which is then valid when we enter ISSUE_RD or ISSUE_WR.
+        #
         # Note: AT field stays under software control for testing SMMU error paths
 
         addr_in_atc = Signal()
