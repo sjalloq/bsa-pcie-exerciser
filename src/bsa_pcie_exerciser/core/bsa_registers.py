@@ -41,6 +41,14 @@ REG_TXN_TRACE      = 0x040
 REG_TXN_CTRL       = 0x044
 REG_ID             = 0x048
 
+# USB Monitor registers (Squirrel/CaptainDMA only)
+REG_USB_MON_CTRL        = 0x080
+REG_USB_MON_STATUS      = 0x084
+REG_USB_MON_RX_CAPTURED = 0x088
+REG_USB_MON_RX_DROPPED  = 0x08C
+REG_USB_MON_TX_CAPTURED = 0x090
+REG_USB_MON_TX_DROPPED  = 0x094
+
 
 class BSARegisters(LiteXModule):
     """
@@ -143,6 +151,16 @@ class BSARegisters(LiteXModule):
         self.txn_fifo_valid = Signal()
         self.txn_fifo_read  = Signal()
 
+        # USB Monitor interface (Squirrel/CaptainDMA only)
+        self.usb_mon_ctrl         = Signal(32, reset=3)  # R/W control register
+        self.usb_mon_rx_enable    = Signal()             # Output: enable RX capture
+        self.usb_mon_tx_enable    = Signal()             # Output: enable TX capture
+        self.usb_mon_clear_stats  = Signal()             # Output: clear statistics (pulse)
+        self.usb_mon_rx_captured  = Signal(32)           # Input: RX packets captured
+        self.usb_mon_rx_dropped   = Signal(32)           # Input: RX packets dropped
+        self.usb_mon_tx_captured  = Signal(32)           # Input: TX packets captured
+        self.usb_mon_tx_dropped   = Signal(32)           # Input: TX packets dropped
+
         # =====================================================================
         # Wishbone Address Decoding
         # =====================================================================
@@ -185,6 +203,13 @@ class BSARegisters(LiteXModule):
                 REG_TXN_TRACE:      read_data.eq(self.txn_trace),
                 REG_TXN_CTRL:       read_data.eq(txn_ctrl_read),
                 REG_ID:             read_data.eq(self.id),
+                # USB Monitor registers
+                REG_USB_MON_CTRL:        read_data.eq(self.usb_mon_ctrl),
+                REG_USB_MON_STATUS:      read_data.eq(0),  # Reserved for overflow flags
+                REG_USB_MON_RX_CAPTURED: read_data.eq(self.usb_mon_rx_captured),
+                REG_USB_MON_RX_DROPPED:  read_data.eq(self.usb_mon_rx_dropped),
+                REG_USB_MON_TX_CAPTURED: read_data.eq(self.usb_mon_tx_captured),
+                REG_USB_MON_TX_DROPPED:  read_data.eq(self.usb_mon_tx_dropped),
                 "default":          read_data.eq(0),
             }),
         ]
@@ -212,6 +237,7 @@ class BSARegisters(LiteXModule):
                         REG_ATSCTL:         self.atsctl.eq(self.bus.dat_w),
                         REG_RID_CTL:        self.rid_ctl.eq(self.bus.dat_w),
                         REG_TXN_CTRL:       self.txn_ctrl.eq(self.bus.dat_w),
+                        REG_USB_MON_CTRL:   self.usb_mon_ctrl.eq(self.bus.dat_w),
                         # Read-only registers ignore writes
                     }),
                 ),
@@ -359,5 +385,19 @@ class BSARegisters(LiteXModule):
             self.txn_fifo_read.eq(
                 self.bus.cyc & self.bus.stb & ~self.bus.we &
                 (reg_addr == REG_TXN_TRACE) & self.bus.ack
+            ),
+        ]
+
+        # USB_MON_CTRL: [0]=rx_en, [1]=tx_en, [2]=clear_stats
+        self.comb += [
+            self.usb_mon_rx_enable.eq(self.usb_mon_ctrl[0]),
+            self.usb_mon_tx_enable.eq(self.usb_mon_ctrl[1]),
+            self.usb_mon_clear_stats.eq(self.usb_mon_ctrl[2]),
+        ]
+
+        # Auto-clear USB_MON clear_stats bit
+        self.sync += [
+            If(self.usb_mon_ctrl[2],
+                self.usb_mon_ctrl[2].eq(0),
             ),
         ]

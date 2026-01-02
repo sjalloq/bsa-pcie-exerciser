@@ -157,11 +157,31 @@ class BSAExerciserSoC(SoCMini):
             # LTSSM Tracer for link debugging
             self.pcie_phy.add_ltssm_tracer()
 
-            # Clock domain crossing constraints
-            platform.add_false_path_constraints(
-                self.crg.cd_sys.clk,
-                self.pcie_phy.cd_pcie.clk
+            # Period constraint on sys_clk
+            platform.add_period_constraint(self.crg.cd_sys.clk, 1e9/sys_clk_freq)
+
+            # GTP channel location (reset from .xci, then set explicitly)
+            platform.toolchain.pre_placement_commands.append(
+                "reset_property LOC [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]"
             )
+            platform.toolchain.pre_placement_commands.append(
+                "set_property LOC GTPE2_CHANNEL_X0Y0 [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]"
+            )
+
+            # PCIe <-> Sys-Clk false paths (using actual Vivado clock names)
+            false_paths = [
+                ("{{*s7pciephy_clkout0}}", "sys_clk"),
+                ("{{*s7pciephy_clkout1}}", "sys_clk"),
+                ("{{*s7pciephy_clkout3}}", "sys_clk"),
+                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}")
+            ]
+            for clk0, clk1 in false_paths:
+                platform.toolchain.pre_placement_commands.append(
+                    f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]"
+                )
+                platform.toolchain.pre_placement_commands.append(
+                    f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]"
+                )
 
         # DMA Buffer and Handler --------------------------------------------------
         self.dma_buffer = BSADMABuffer(

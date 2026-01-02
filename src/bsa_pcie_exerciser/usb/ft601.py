@@ -3,7 +3,7 @@
 #
 # Copyright (c) 2016 Florent Kermarrec <florent@enjoy-digital.fr>
 # Copyright (c) 2018-2019 Pierre-Olivier Vauboin <po@lambdaconcept.com>
-# Copyright (c) 2025 Shareef Jalloq <shareef@jalloq.co.uk>
+# Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Ported from enjoy-digital/pcie_screamer with adaptations for BSA Exerciser.
