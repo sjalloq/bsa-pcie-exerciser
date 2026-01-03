@@ -1,7 +1,7 @@
 #
 # BSA Monitor - Live TUI View
 #
-# Copyright (c) 2025 Shareef Jalloq <shareef@jalloq.co.uk>
+# Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Rich-based terminal UI for live transaction viewing.

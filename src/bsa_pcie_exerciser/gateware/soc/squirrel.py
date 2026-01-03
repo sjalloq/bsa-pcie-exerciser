@@ -48,38 +48,54 @@ class SquirrelSoC(BSAExerciserSoC):
     - USB channel multiplexer
     - Etherbone for CSR access via USB (channel 0)
     - Transaction monitor streaming via USB (channel 1)
+
+    Parameters
+    ----------
+    usb_phy : optional
+        Pre-instantiated USB PHY (for simulation). If None, creates FT601Sync
+        from platform USB FIFO pads.
     """
 
-    def __init__(self, platform, sys_clk_freq=125e6, **kwargs):
+    def __init__(self, platform, sys_clk_freq=125e6, usb_phy=None, **kwargs):
         # Initialize base SoC with SquirrelCRG
         super().__init__(platform, sys_clk_freq, crg_cls=SquirrelCRG, **kwargs)
 
-        # USB clock domain (from FT601's 100MHz clock)
+        # USB clock domain (from FT601's 100MHz clock or simulation)
         self.cd_usb = ClockDomain()
 
-        # Request USB FIFO pads
-        usb_pads = platform.request("usb_fifo")
+        # Use injected USB PHY or create from platform pads
+        if usb_phy is not None:
+            # Simulation mode: use injected PHY stub
+            self.usb_phy = usb_phy
+            # In simulation, the USB clock domain is managed by the testbench
+        else:
+            # Hardware mode: create FT601Sync from platform pads
+            usb_pads = platform.request("usb_fifo")
 
-        # Connect FT601 clock to USB domain
-        self.comb += self.cd_usb.clk.eq(usb_pads.clk)
-        self.specials += AsyncResetSynchronizer(self.cd_usb, self.crg.rst)
+            # Connect FT601 clock to USB domain
+            self.comb += self.cd_usb.clk.eq(usb_pads.clk)
+            self.specials += AsyncResetSynchronizer(self.cd_usb, self.crg.rst)
 
-        # FT601 PHY
-        self.usb_phy = FT601Sync(usb_pads, dw=32, timeout=1024)
+            # FT601 PHY
+            self.usb_phy = FT601Sync(usb_pads, dw=32, timeout=1024)
 
         # USB Core (packetizer + crossbar)
         self.usb_core = USBCore(self.usb_phy, sys_clk_freq)
 
         # Etherbone (USB -> Wishbone) on channel 0
-        self.etherbone = Etherbone(self.usb_core, channel_id=0)
+        # buffer_depth must accommodate the largest burst: 1 base_addr + N read/write addresses
+        # Default of 4 causes deadlock for bursts > 3 addresses (PacketFIFO needs entire
+        # payload before 'last' commits the params, but full FIFO blocks upstream)
+        self.etherbone = Etherbone(self.usb_core, channel_id=0, buffer_depth=16)
         self.bus.add_master("usb", master=self.etherbone.master.bus)
 
         # USB Monitor Subsystem on channel 1
         self._add_usb_monitor()
 
-        # Clock constraints
-        platform.add_period_constraint(usb_pads.clk, 1e9/100e6)
-        platform.add_false_path_constraints(self.crg.cd_sys.clk, self.cd_usb.clk)
+        # Clock constraints (only for hardware mode with real USB pads)
+        if usb_phy is None:
+            platform.add_period_constraint(usb_pads.clk, 1e9/100e6)
+            platform.add_false_path_constraints(self.crg.cd_sys.clk, self.cd_usb.clk)
 
     def _add_usb_monitor(self):
         """Add USB TLP monitor subsystem on channel 1."""
@@ -91,8 +107,6 @@ class SquirrelSoC(BSAExerciserSoC):
         self.usb_monitor = USBMonitorSubsystem(
             data_width=self.pcie_phy.data_width,
             payload_fifo_depth=512,
-            cd_sys="sys",
-            cd_usb="usb",
         )
 
         # Connect timestamp

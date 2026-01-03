@@ -105,22 +105,31 @@ class MonitorPacketArbiter(LiteXModule):
             self.tx_payload.ready.eq(0),
 
             # Priority: RX first, then TX
+            # Compute packet_length_bytes HERE so it's valid when HEADER outputs first word
             If(self.rx_header.valid,
                 NextValue(from_tx, 0),
                 NextValue(header_count, HEADER_WORDS_32),
+                NextValue(payload_length_dw, self.rx_header.data[:10]),
+                NextValue(packet_length_bytes, (HEADER_WORDS_32 + self.rx_header.data[:10]) << 2),
                 NextState("HEADER"),
             ).Elif(self.tx_header.valid,
                 NextValue(from_tx, 1),
                 NextValue(header_count, HEADER_WORDS_32),
+                NextValue(payload_length_dw, self.tx_header.data[:10]),
+                NextValue(packet_length_bytes, (HEADER_WORDS_32 + self.tx_header.data[:10]) << 2),
                 NextState("HEADER"),
             ),
         )
+
+        # Header-only packet needs last on final header word
+        header_last = Signal()
+        self.comb += header_last.eq((header_count == 1) & (payload_length_dw == 0))
 
         fsm.act("HEADER",
             self.source.valid.eq(header_valid),
             self.source.data.eq(header_data),
             self.source.first.eq(header_count == HEADER_WORDS_32),
-            self.source.last.eq(0),
+            self.source.last.eq(header_last),
 
             # Ready to appropriate header FIFO
             self.rx_header.ready.eq(~from_tx & self.source.ready),
@@ -130,13 +139,6 @@ class MonitorPacketArbiter(LiteXModule):
 
             If(header_valid & self.source.ready,
                 NextValue(header_count, header_count - 1),
-
-                # Capture payload length from first word and compute packet length
-                If(header_count == HEADER_WORDS_32,
-                    NextValue(payload_length_dw, header_data[:10]),
-                    # Packet length = (header_words + payload_dw) * 4 bytes
-                    NextValue(packet_length_bytes, (HEADER_WORDS_32 + header_data[:10]) << 2),
-                ),
 
                 If(header_count == 1,
                     NextValue(payload_count, payload_length_dw),

@@ -11,7 +11,7 @@ from .layouts import (
     DIR_RX, DIR_TX, HEADER_WORDS,
 )
 from .capture import TLPCaptureEngine
-from .async_fifo import MonitorAsyncFIFO, MonitorHeaderFIFO, MonitorPayloadFIFO
+from .fifo import MonitorHeaderFIFO, MonitorPayloadFIFO
 from .arbiter import MonitorPacketArbiter
 from .top import USBMonitorSubsystem
 
@@ -30,7 +30,6 @@ __all__ = [
     "HEADER_WORDS",
     # Modules
     "TLPCaptureEngine",
-    "MonitorAsyncFIFO",
     "MonitorHeaderFIFO",
     "MonitorPayloadFIFO",
     "MonitorPacketArbiter",

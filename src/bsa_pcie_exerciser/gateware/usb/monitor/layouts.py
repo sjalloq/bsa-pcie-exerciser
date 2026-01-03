@@ -36,10 +36,10 @@ DIR_TX = 1  # Outbound (device -> host)
 # variable-length payload to the payload FIFO.
 #
 # Word 0 (Header):
-#     [9:0]   : payload_length (DWs, from TLP length field)
+#     [9:0]   : payload_length (DWs, actual payload written - may be less than TLP if truncated)
 #     [13:10] : tlp_type
 #     [14]    : direction (0=RX, 1=TX)
-#     [15]    : reserved
+#     [15]    : truncated (1 if payload was truncated due to FIFO backpressure)
 #     [31:16] : header_word_count (fixed: 4)
 #     [63:32] : timestamp[31:0]
 #
@@ -73,24 +73,27 @@ HEADER_WORDS = 4
 HEADER_WORD_COUNT = 4  # Encoded in header word 0
 
 
-def build_header_word0(payload_length, tlp_type, direction, timestamp_lo):
+def build_header_word0(payload_length, tlp_type, direction, timestamp_lo, truncated=None):
     """
     Build header word 0.
 
     Args:
-        payload_length: TLP length in DWs (10 bits)
+        payload_length: Actual payload length in DWs (10 bits)
         tlp_type: TLP type encoding (4 bits)
         direction: 0=RX, 1=TX (1 bit)
         timestamp_lo: Lower 32 bits of timestamp
+        truncated: 1 if payload was truncated (1 bit), default 0
 
     Returns:
         64-bit header word 0
     """
+    if truncated is None:
+        truncated = Constant(0, 1)
     return Cat(
         payload_length[:10],           # [9:0]
         tlp_type[:4],                  # [13:10]
         direction,                     # [14]
-        Constant(0, 1),                # [15] reserved
+        truncated,                     # [15] truncated flag
         Constant(HEADER_WORD_COUNT, 16),  # [31:16]
         timestamp_lo,                  # [63:32]
     )

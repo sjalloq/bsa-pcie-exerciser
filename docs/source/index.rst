@@ -33,6 +33,12 @@ Getting Started
 
 .. toctree::
    :maxdepth: 2
+   :caption: USB Interface:
+
+   etherbone/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: Background:
 
    pcie/index

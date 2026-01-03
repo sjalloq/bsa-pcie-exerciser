@@ -1,7 +1,7 @@
 #
 # BSA Monitor - Export Functions
 #
-# Copyright (c) 2025 Shareef Jalloq <shareef@jalloq.co.uk>
+# Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Export captured packets to various formats.

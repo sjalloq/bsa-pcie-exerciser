@@ -1,7 +1,7 @@
 #
 # BSA Monitor - UDP Capture and Decode
 #
-# Copyright (c) 2025 Shareef Jalloq <shareef@jalloq.co.uk>
+# Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Captures monitor packets from UDP and decodes them.

@@ -15,7 +15,7 @@ from litex.soc.interconnect import stream
 
 from .layouts import DIR_RX, DIR_TX
 from .capture import TLPCaptureEngine
-from .async_fifo import MonitorHeaderFIFO, MonitorPayloadFIFO
+from .fifo import MonitorHeaderFIFO, MonitorPayloadFIFO
 from .arbiter import MonitorPacketArbiter
 
 from ..core import usb_channel_description
@@ -36,12 +36,6 @@ class USBMonitorSubsystem(LiteXModule):
     payload_fifo_depth : int
         Depth of payload FIFOs in 64-bit words. Default 512 (1 BRAM each).
 
-    cd_sys : str
-        System clock domain name. Default "sys".
-
-    cd_usb : str
-        USB clock domain name. Default "usb".
-
     Interfaces
     ----------
     rx_tap_* : Signals
@@ -51,7 +45,7 @@ class USBMonitorSubsystem(LiteXModule):
         TX (outbound) tap signals from packetizer
 
     source : stream.Endpoint
-        Output to USB channel (32-bit, usb_clk domain)
+        Output to USB channel (32-bit). CDC to USB clock handled by FT601 PHY.
 
     Control/Status:
         rx_enable, tx_enable : Enable signals
@@ -60,8 +54,7 @@ class USBMonitorSubsystem(LiteXModule):
         clear_stats : Clear all statistics
     """
 
-    def __init__(self, data_width=64, payload_fifo_depth=512,
-                 cd_sys="sys", cd_usb="usb"):
+    def __init__(self, data_width=64, payload_fifo_depth=512):
         # =====================================================================
         # Control Interface
         # =====================================================================
@@ -154,8 +147,10 @@ class USBMonitorSubsystem(LiteXModule):
 
         self.rx_captured = Signal(32)
         self.rx_dropped = Signal(32)
+        self.rx_truncated = Signal(32)
         self.tx_captured = Signal(32)
         self.tx_dropped = Signal(32)
+        self.tx_truncated = Signal(32)
 
         # =====================================================================
         # RX Path
@@ -206,14 +201,10 @@ class USBMonitorSubsystem(LiteXModule):
         ]
 
         # RX FIFOs
-        self.rx_header_fifo = rx_header_fifo = MonitorHeaderFIFO(
-            cd_write=cd_sys,
-            cd_read=cd_usb,
-        )
+        # FT601 PHY handles CDC to external USB clock.
+        self.rx_header_fifo = rx_header_fifo = MonitorHeaderFIFO()
         self.rx_payload_fifo = rx_payload_fifo = MonitorPayloadFIFO(
             depth=payload_fifo_depth,
-            cd_write=cd_sys,
-            cd_read=cd_usb,
         )
 
         # Connect capture engine to FIFOs
@@ -226,6 +217,7 @@ class USBMonitorSubsystem(LiteXModule):
         self.comb += [
             self.rx_captured.eq(rx_capture.packets_captured),
             self.rx_dropped.eq(rx_capture.packets_dropped),
+            self.rx_truncated.eq(rx_capture.packets_truncated),
         ]
 
         # =====================================================================
@@ -278,14 +270,10 @@ class USBMonitorSubsystem(LiteXModule):
         ]
 
         # TX FIFOs
-        self.tx_header_fifo = tx_header_fifo = MonitorHeaderFIFO(
-            cd_write=cd_sys,
-            cd_read=cd_usb,
-        )
+        # FT601 PHY handles CDC to external USB clock.
+        self.tx_header_fifo = tx_header_fifo = MonitorHeaderFIFO()
         self.tx_payload_fifo = tx_payload_fifo = MonitorPayloadFIFO(
             depth=payload_fifo_depth,
-            cd_write=cd_sys,
-            cd_read=cd_usb,
         )
 
         # Connect capture engine to FIFOs
@@ -298,6 +286,7 @@ class USBMonitorSubsystem(LiteXModule):
         self.comb += [
             self.tx_captured.eq(tx_capture.packets_captured),
             self.tx_dropped.eq(tx_capture.packets_dropped),
+            self.tx_truncated.eq(tx_capture.packets_truncated),
         ]
 
         # =====================================================================

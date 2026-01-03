@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "BSD-2-Clause"}
 requires-python = ">=3.10"
 authors = [
-    {name = "Shareef Jalloq", email = "shareef@jalloq.co.uk"},
+    {name = "Shareef Jalloq"},
 ]
 keywords = [
     "pcie",

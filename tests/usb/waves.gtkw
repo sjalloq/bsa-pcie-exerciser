@@ -1,0 +1,204 @@
+[*]
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Sat Jan  3 11:02:23 2026
+[*]
+[dumpfile] "dump.fst"
+[dumpfile_mtime] "Sat Jan  3 02:53:20 2026"
+[dumpfile_size] 1456510
+[savefile] "waves.gtkw"
+[timestart] 613000
+[size] 3680 1892
+[pos] -1 -1
+*-14.690623 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[sst_width] 688
+[signals_width] 671
+[sst_expanded] 1
+[sst_vpaned_height] 603
+@28
+tb_usb.pcie_clk
+tb_usb.sys_clk
+tb_usb.usb_clk
+tb_usb.squirrelsoc_depacketizer_tlp_req_valid
+tb_usb.squirrelsoc_depacketizer_tlp_req_payload_fmt[1:0]
+@22
+tb_usb.squirrelsoc_depacketizer_tlp_req_payload_type[4:0]
+@800200
+-Etherbone Master
+@28
+tb_usb.etherbone_master_bus_cyc
+tb_usb.etherbone_master_bus_stb
+tb_usb.etherbone_master_bus_ack
+@22
+tb_usb.etherbone_master_bus_adr[29:0]
+@28
+tb_usb.etherbone_master_bus_we
+@22
+tb_usb.etherbone_master_bus_dat_w[31:0]
+@28
+tb_usb.etherbone_master_bus_err
+@22
+tb_usb.etherbone_master_bus_dat_r[31:0]
+@1000200
+-Etherbone Master
+@28
+tb_usb.etherbone_packet_rx_source_source_valid
+tb_usb.etherbone_packet_rx_source_source_ready
+tb_usb.etherbone_packet_rx_source_source_first
+tb_usb.etherbone_packet_rx_source_source_last
+@22
+tb_usb.etherbone_packet_rx_source_source_param_dst[7:0]
+tb_usb.etherbone_packet_rx_source_source_param_length[31:0]
+tb_usb.etherbone_packet_rx_source_source_payload_data[31:0]
+@800200
+-Packet RX Sink
+@28
+tb_usb.etherbone_packet_rx_sink_sink_valid
+tb_usb.etherbone_packet_rx_sink_sink_ready
+tb_usb.etherbone_packet_rx_sink_sink_first
+tb_usb.etherbone_packet_rx_sink_sink_last
+@22
+tb_usb.etherbone_packet_rx_sink_sink_param_dst[7:0]
+tb_usb.etherbone_packet_rx_sink_sink_param_length[31:0]
+tb_usb.etherbone_packet_rx_sink_sink_payload_data[31:0]
+tb_usb.etherbone_packet_rx_sink_sink_payload_error[3:0]
+@1000200
+-Packet RX Sink
+@22
+tb_usb.etherbone_packet_rx_depacketizer_sr[63:0]
+@28
+tb_usb.etherbone_packet_rx_depacketizer_sr_shift
+tb_usb.etherbone_packet_rx_depacketizer_sr_shift_leftover
+@22
+tb_usb.etherbone_packet_rx_depacketizer_header[63:0]
+@28
+tb_usb.etherbone_packet_rx_depacketizer_count
+tb_usb.etherbone_packet_rx_depacketizer_sink_first
+tb_usb.etherbone_packet_rx_depacketizer_sink_last
+tb_usb.etherbone_packet_rx_depacketizer_sink_d_last
+tb_usb.etherbone_packet_rx_depacketizer_sink_valid
+@22
+tb_usb.etherbone_packet_rx_depacketizer_sink_payload_data[31:0]
+@28
+tb_usb.usbcore_usbdepacketizer_state[1:0]
+@22
+tb_usb.squirrelsoc_bsa_regs_dma_offset[31:0]
+@800200
+-Regfile
+@28
+tb_usb.squirrelsoc_bsa_regs_bus_cyc
+tb_usb.squirrelsoc_bsa_regs_bus_stb
+tb_usb.squirrelsoc_bsa_regs_bus_ack
+tb_usb.squirrelsoc_bsa_regs_bus_we
+@22
+tb_usb.squirrelsoc_bsa_regs_bus_adr[31:0]
+@28
+tb_usb.squirrelsoc_bsa_regs_bus_bte[1:0]
+tb_usb.squirrelsoc_bsa_regs_bus_cti[2:0]
+@22
+tb_usb.squirrelsoc_bsa_regs_bus_dat_r[31:0]
+tb_usb.squirrelsoc_bsa_regs_bus_dat_w[31:0]
+@28
+tb_usb.squirrelsoc_bsa_regs_bus_err
+@22
+tb_usb.squirrelsoc_bsa_regs_bus_sel[3:0]
+@1000200
+-Regfile
+@800200
+-USB Arbiter + Crossbar
+@28
+tb_usb.squirrelsoc_arbiter_from_tx
+@22
+tb_usb.squirrelsoc_arbiter_payload_length_dw[9:0]
+tb_usb.squirrelsoc_arbiter_payload_count[15:0]
+@28
+tb_usb.usbmonitorsubsystem_state[1:0]
+tb_usb.usbcore_request[1:0]
+tb_usb.usbcore_grant
+tb_usb.usbcore_status0_ongoing1
+tb_usb.usbcore_status1_ongoing1
+tb_usb.usbcore_status0_last
+tb_usb.usbcore_status1_last
+tb_usb.usb_core_packetizer_sink_sink_valid
+tb_usb.usb_core_packetizer_sink_sink_ready
+tb_usb.usb_core_packetizer_sink_sink_last
+@22
+tb_usb.usb_core_packetizer_sink_sink_param_dst[7:0]
+tb_usb.usb_core_packetizer_sink_sink_param_length[31:0]
+tb_usb.usb_core_packetizer_sink_sink_payload_data[31:0]
+tb_usb.squirrelsoc_arbiter_packet_length_bytes[31:0]
+@800200
+-Data to TX CDC FIFO
+@28
+tb_usb.tx_fifo_sink_valid
+tb_usb.tx_fifo_sink_ready
+tb_usb.tx_fifo_sink_first
+tb_usb.tx_fifo_sink_last
+@22
+tb_usb.tx_fifo_sink_payload_data[31:0]
+@1000200
+-Data to TX CDC FIFO
+-USB Arbiter + Crossbar
+@28
+tb_usb.squirrelsoc_depacketizer_tlp_req_valid
+tb_usb.squirrelsoc_depacketizer_tlp_req_ready
+tb_usb.squirrelsoc_depacketizer_tlp_req_first
+tb_usb.squirrelsoc_depacketizer_tlp_req_last
+@c00200
+-Testbench USB Driver
+@22
+tb_usb.usb_inject_data[31:0]
+@28
+tb_usb.usb_inject_ready
+tb_usb.usb_inject_valid
+@1401200
+-Testbench USB Driver
+@800200
+-RX Capture
+@28
+tb_usb.squirrelsoc_rx_capture_enable
+tb_usb.squirrelsoc_rx_capture_tap_valid
+tb_usb.squirrelsoc_rx_capture_tap_first
+tb_usb.squirrelsoc_rx_capture_tap_last
+@22
+tb_usb.squirrelsoc_rx_capture_tap_tag[7:0]
+@23
+tb_usb.squirrelsoc_rx_capture_latched_tag[7:0]
+@22
+tb_usb.squirrelsoc_rx_capture_tap_dat[63:0]
+@28
+tb_usb.squirrelsoc_rx_capture_dropping
+@24
+tb_usb.squirrelsoc_rx_capture_packets_captured[31:0]
+tb_usb.squirrelsoc_rx_capture_packets_dropped[31:0]
+@22
+tb_usb.squirrelsoc_rx_capture_packets_truncated[31:0]
+tb_usb.squirrelsoc_rx_capture_true_beats_count[9:0]
+@800200
+-Header
+@28
+tb_usb.squirrelsoc_rx_capture_header_sink_valid
+tb_usb.squirrelsoc_rx_capture_header_sink_ready
+tb_usb.squirrelsoc_rx_capture_header_sink_first
+tb_usb.squirrelsoc_rx_capture_header_sink_last
+@1000200
+-Header
+@800200
+-Payload
+@28
+tb_usb.squirrelsoc_rx_capture_payload_sink_valid
+tb_usb.squirrelsoc_rx_capture_payload_sink_ready
+tb_usb.squirrelsoc_rx_capture_payload_sink_first
+tb_usb.squirrelsoc_rx_capture_payload_sink_last
+@1000200
+-Payload
+@22
+tb_usb.squirrelsoc_rx_capture_payload_sink_payload_data[63:0]
+@1000200
+-RX Capture
+@28
+tb_usb.capture_valid
+tb_usb.capture_ready
+@22
+tb_usb.capture_data[31:0]
+[pattern_trace] 1
+[pattern_trace] 0

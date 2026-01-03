@@ -7,8 +7,11 @@
 # Captures TLPs from parsed tap points and streams to header/payload FIFOs.
 # Parameterized for RX (inbound) or TX (outbound) direction.
 #
-# Design: Simple - push header to 256-bit FIFO on first beat,
-# push payload to 64-bit FIFO every beat.
+# Design:
+# - On first beat: check header FIFO ready, latch header fields, start payload
+# - On all beats: write payload to FIFO, track actual beats written
+# - On last beat: write header with actual payload length and truncated flag
+# - If header FIFO not ready on first beat: drop entire packet
 #
 
 from migen import *
@@ -29,10 +32,11 @@ class TLPCaptureEngine(LiteXModule):
     """
     Captures TLPs from tap points and streams to header/payload FIFOs.
 
-    Simple design:
-    - Header (256-bit) pushed to FIFO on first beat
-    - Payload (64-bit) pushed to FIFO every beat
-    - Drop packet if header FIFO full on first beat
+    Robust design with truncation handling:
+    - Header written on LAST beat (not first) with actual payload length
+    - If payload FIFO backpressures mid-packet, packet is truncated (not dropped)
+    - Truncated flag in header indicates partial capture
+    - If header FIFO full on first beat, entire packet is dropped
 
     Parameters
     ----------
@@ -116,6 +120,7 @@ class TLPCaptureEngine(LiteXModule):
 
         self.packets_captured = Signal(32)
         self.packets_dropped = Signal(32)
+        self.packets_truncated = Signal(32)
 
         # =====================================================================
         # Tap Signal Muxing
@@ -219,9 +224,164 @@ class TLPCaptureEngine(LiteXModule):
         ]
 
         # =====================================================================
-        # Header Word Construction (combinatorial)
+        # Latched Header Fields (captured on first beat)
         # =====================================================================
 
+        latched_tlp_type = Signal(4)
+        latched_timestamp = Signal(64)
+        latched_req_id = Signal(16)
+        latched_tag = Signal(8)
+        latched_first_be = Signal(4)
+        latched_last_be = Signal(4)
+        latched_adr = Signal(64)
+        latched_we = Signal()
+        latched_bar_hit = Signal(3)
+        latched_attr = Signal(2)
+        latched_at = Signal(2)
+        latched_pasid_valid = Signal()
+        latched_pasid = Signal(20)
+        latched_status = Signal(3)
+        latched_cmp_id = Signal(16)
+        latched_byte_count = Signal(12)
+
+        # =====================================================================
+        # Packet State
+        # =====================================================================
+
+        # Are we dropping this packet? (header FIFO was full on first beat)
+        dropping = Signal()
+
+        # Payload tracking
+        payload_beats_written = Signal(10)  # Count of 64-bit beats successfully written
+        payload_truncated = Signal()        # Set if any payload beat failed
+
+        # =====================================================================
+        # Beat Detection
+        # =====================================================================
+
+        first_beat = self.enable & tap_valid & tap_first
+        last_beat = self.enable & tap_valid & tap_last
+        any_beat = self.enable & tap_valid
+
+        # =====================================================================
+        # Payload: write to FIFO only for TLPs with payload
+        # =====================================================================
+
+        # Determine if this TLP type has payload:
+        # - Requests: MWr (tap_we=1) has payload, MRd (tap_we=0) does not
+        # - Completions: CPLD (tap_len>0) has payload, CPL (tap_len=0) does not
+        has_payload = Signal()
+        self.comb += [
+            If(tap_is_request,
+                has_payload.eq(tap_we),  # MWr has payload, MRd doesn't
+            ).Elif(tap_is_completion,
+                has_payload.eq(tap_len > 0),  # CPLD has payload, CPL doesn't
+            ).Else(
+                has_payload.eq(0),
+            ),
+        ]
+
+        # Suppress payload when dropping OR when about to drop (header FIFO full on first beat)
+        # The dropping flag is registered, so it doesn't take effect until next cycle.
+        # We need start_dropping to prevent orphan payload on the first beat of a dropped packet.
+        start_dropping = first_beat & ~self.header_sink.ready
+
+        self.comb += [
+            self.payload_sink.valid.eq(any_beat & has_payload & ~dropping & ~start_dropping),
+            self.payload_sink.data.eq(tap_dat),
+        ]
+
+        # Track successful writes and failures
+        payload_write_success = self.payload_sink.valid & self.payload_sink.ready
+        payload_write_failed = self.payload_sink.valid & ~self.payload_sink.ready
+
+        # Final truncated status includes current beat's failure (for last beat check)
+        final_truncated = Signal()
+        self.comb += final_truncated.eq(payload_truncated | payload_write_failed)
+
+        # =====================================================================
+        # Header Construction (uses latched values + actual payload count)
+        # =====================================================================
+
+        # True beat count for header (includes current beat's success)
+        # - On first beat: count is 1 (success) or 0 (fail)
+        # - On other beats: registered count + current beat
+        true_beats_count = Signal(10)
+        self.comb += [
+            If(first_beat,
+                true_beats_count.eq(payload_write_success),
+            ).Else(
+                true_beats_count.eq(payload_beats_written + payload_write_success),
+            ),
+        ]
+
+        # Actual payload length in 32-bit DWORDs = beats * 2
+        actual_payload_dw = Signal(10)
+        self.comb += actual_payload_dw.eq(true_beats_count << 1)
+
+        # For single-beat packets (first=last=1), the latched values haven't been
+        # updated yet (sync takes effect next cycle). Use tap signals directly.
+        # For multi-beat packets, tap signals on last beat contain payload data,
+        # so we must use the latched values captured on first beat.
+        single_beat = Signal()
+        self.comb += single_beat.eq(first_beat & tap_last)
+
+        use_tlp_type = Signal(4)
+        use_timestamp = Signal(64)
+        use_req_id = Signal(16)
+        use_tag = Signal(8)
+        use_first_be = Signal(4)
+        use_last_be = Signal(4)
+        use_adr = Signal(64)
+        use_we = Signal()
+        use_bar_hit = Signal(3)
+        use_attr = Signal(2)
+        use_at = Signal(2)
+        use_pasid_valid = Signal()
+        use_pasid = Signal(20)
+        use_status = Signal(3)
+        use_cmp_id = Signal(16)
+        use_byte_count = Signal(12)
+
+        self.comb += [
+            If(single_beat,
+                use_tlp_type.eq(tlp_type),
+                use_timestamp.eq(self.timestamp),
+                use_req_id.eq(tap_req_id),
+                use_tag.eq(tap_tag),
+                use_first_be.eq(tap_first_be),
+                use_last_be.eq(tap_last_be),
+                use_adr.eq(tap_adr),
+                use_we.eq(tap_we),
+                use_bar_hit.eq(tap_bar_hit),
+                use_attr.eq(tap_attr),
+                use_at.eq(tap_at),
+                use_pasid_valid.eq(tap_pasid_valid),
+                use_pasid.eq(tap_pasid),
+                use_status.eq(tap_status),
+                use_cmp_id.eq(tap_cmp_id),
+                use_byte_count.eq(tap_byte_count),
+            ).Else(
+                use_tlp_type.eq(latched_tlp_type),
+                use_timestamp.eq(latched_timestamp),
+                use_req_id.eq(latched_req_id),
+                use_tag.eq(latched_tag),
+                use_first_be.eq(latched_first_be),
+                use_last_be.eq(latched_last_be),
+                use_adr.eq(latched_adr),
+                use_we.eq(latched_we),
+                use_bar_hit.eq(latched_bar_hit),
+                use_attr.eq(latched_attr),
+                use_at.eq(latched_at),
+                use_pasid_valid.eq(latched_pasid_valid),
+                use_pasid.eq(latched_pasid),
+                use_status.eq(latched_status),
+                use_cmp_id.eq(latched_cmp_id),
+                use_byte_count.eq(latched_byte_count),
+            ),
+        ]
+
+        # Build header words
         header_word0 = Signal(64)
         header_word1 = Signal(64)
         header_word2 = Signal(64)
@@ -229,23 +389,25 @@ class TLPCaptureEngine(LiteXModule):
 
         self.comb += [
             header_word0.eq(build_header_word0(
-                tap_len, tlp_type, direction, self.timestamp[:32]
+                actual_payload_dw, use_tlp_type, direction,
+                use_timestamp[:32], final_truncated
             )),
             header_word1.eq(build_header_word1(
-                self.timestamp[32:64], tap_req_id, tap_tag, tap_first_be, tap_last_be
+                use_timestamp[32:64], use_req_id, use_tag,
+                use_first_be, use_last_be
             )),
-            header_word2.eq(build_header_word2(tap_adr)),
+            header_word2.eq(build_header_word2(use_adr)),
         ]
 
         if direction == DIR_RX:
             self.comb += header_word3.eq(build_header_word3_rx(
-                tap_we, tap_bar_hit, tap_attr, tap_at,
-                tap_status, tap_cmp_id, tap_byte_count
+                use_we, use_bar_hit, use_attr, use_at,
+                use_status, use_cmp_id, use_byte_count
             ))
         else:
             self.comb += header_word3.eq(build_header_word3_tx(
-                tap_we, tap_attr, tap_at, tap_pasid_valid, tap_pasid,
-                tap_status, tap_cmp_id, tap_byte_count
+                use_we, use_attr, use_at, use_pasid_valid, use_pasid,
+                use_status, use_cmp_id, use_byte_count
             ))
 
         # Full 256-bit header
@@ -253,65 +415,94 @@ class TLPCaptureEngine(LiteXModule):
         self.comb += full_header.eq(Cat(header_word0, header_word1, header_word2, header_word3))
 
         # =====================================================================
-        # State: just "are we dropping this packet?"
+        # Header: write to FIFO on LAST beat (if not dropping)
         # =====================================================================
-
-        dropping = Signal()
-
-        # =====================================================================
-        # Header: push to FIFO on first beat (if FIFO ready)
-        # =====================================================================
-
-        # Try to write header on first beat
-        first_beat = self.enable & tap_valid & tap_first
 
         self.comb += [
-            self.header_sink.valid.eq(first_beat & ~dropping),
+            self.header_sink.valid.eq(last_beat & ~dropping),
             self.header_sink.data.eq(full_header),
         ]
 
         # =====================================================================
-        # Payload: push to FIFO every beat (if not dropping)
+        # State Machine & Statistics
         # =====================================================================
 
-        self.comb += [
-            self.payload_sink.valid.eq(self.enable & tap_valid & ~dropping),
-            self.payload_sink.data.eq(tap_dat),
-        ]
-
-        # =====================================================================
-        # Drop Logic & Statistics
-        # =====================================================================
+        # Detect single-beat drops (first=last=1 when header FIFO full)
+        # Need combinatorial signal since dropping flag doesn't take effect until next cycle
+        single_beat_drop = Signal()
+        self.comb += single_beat_drop.eq(first_beat & tap_last & ~self.header_sink.ready)
 
         self.sync += [
-            # On first beat: check if header FIFO accepted it
+            # On first beat: decide whether to capture or drop, initialize counters
             If(first_beat,
                 If(self.header_sink.ready,
-                    # Header accepted - packet will be captured
-                    self.packets_captured.eq(self.packets_captured + 1),
-                    # If single-beat packet, we're done; else stay not-dropping
+                    # Header FIFO has room - proceed with capture
                     dropping.eq(0),
-                ).Else(
-                    # Header FIFO full - drop this packet
-                    If(~tap_last,
-                        # Multi-beat: need to drop remaining beats
-                        dropping.eq(1),
+
+                    # Initialize and count first beat in one step
+                    If(payload_write_success,
+                        payload_beats_written.eq(1),
                     ).Else(
-                        # Single-beat: dropped immediately
-                        self.packets_dropped.eq(self.packets_dropped + 1),
+                        payload_beats_written.eq(0),
+                    ),
+                    payload_truncated.eq(payload_write_failed),
+
+                    # Latch header fields
+                    latched_tlp_type.eq(tlp_type),
+                    latched_timestamp.eq(self.timestamp),
+                    latched_req_id.eq(tap_req_id),
+                    latched_tag.eq(tap_tag),
+                    latched_first_be.eq(tap_first_be),
+                    latched_last_be.eq(tap_last_be),
+                    latched_adr.eq(tap_adr),
+                    latched_we.eq(tap_we),
+                    latched_bar_hit.eq(tap_bar_hit),
+                    latched_attr.eq(tap_attr),
+                    latched_at.eq(tap_at),
+                    latched_pasid_valid.eq(tap_pasid_valid),
+                    latched_pasid.eq(tap_pasid),
+                    latched_status.eq(tap_status),
+                    latched_cmp_id.eq(tap_cmp_id),
+                    latched_byte_count.eq(tap_byte_count),
+                ).Else(
+                    # Header FIFO full - drop entire packet
+                    # For multi-beat: set dropping flag (count on last beat)
+                    # For single-beat: count handled by last_beat block via single_beat_drop
+                    If(~tap_last,
+                        dropping.eq(1),
                     ),
                 ),
             ),
 
-            # On last beat while dropping: count and clear
-            If(tap_valid & tap_last & dropping,
-                self.packets_dropped.eq(self.packets_dropped + 1),
-                dropping.eq(0),
+            # Track payload writes on non-first beats (when not dropping)
+            If(any_beat & ~first_beat & ~dropping,
+                If(payload_write_success,
+                    payload_beats_written.eq(payload_beats_written + 1),
+                ),
+                If(payload_write_failed,
+                    payload_truncated.eq(1),
+                ),
+            ),
+
+            # On last beat: finalize statistics
+            If(last_beat,
+                If(dropping | single_beat_drop,
+                    # Was dropping or single-beat drop - count as dropped
+                    self.packets_dropped.eq(self.packets_dropped + 1),
+                    dropping.eq(0),
+                ).Else(
+                    # Captured (possibly truncated)
+                    self.packets_captured.eq(self.packets_captured + 1),
+                    If(final_truncated,
+                        self.packets_truncated.eq(self.packets_truncated + 1),
+                    ),
+                ),
             ),
 
             # Statistics clear
             If(self.clear_stats,
                 self.packets_captured.eq(0),
                 self.packets_dropped.eq(0),
+                self.packets_truncated.eq(0),
             ),
         ]

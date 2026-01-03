@@ -1,7 +1,7 @@
 #
 # BSA Monitor - Command Line Interface
 #
-# Copyright (c) 2025 Shareef Jalloq <shareef@jalloq.co.uk>
+# Copyright (c) 2025 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Click-based CLI for the BSA monitor tools.

@@ -28,5 +28,6 @@ else
   source "$VENV/bin/activate"
 fi
 
-# pre-commit install
 git submodule update --init --recursive
+
+pre-commit install

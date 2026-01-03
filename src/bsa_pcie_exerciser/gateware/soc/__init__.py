@@ -7,10 +7,11 @@
 
 from bsa_pcie_exerciser.gateware.soc.base import BSAExerciserSoC
 from bsa_pcie_exerciser.gateware.soc.spec_a7 import SPECA7CRG
-from bsa_pcie_exerciser.gateware.soc.squirrel import SquirrelCRG
+from bsa_pcie_exerciser.gateware.soc.squirrel import SquirrelCRG, SquirrelSoC
 
 __all__ = [
     "BSAExerciserSoC",
     "SPECA7CRG",
     "SquirrelCRG",
+    "SquirrelSoC",
 ]
