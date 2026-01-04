@@ -36,7 +36,7 @@ DIR_TX = 1  # Outbound (device -> host)
 # variable-length payload to the payload FIFO.
 #
 # Word 0 (Header):
-#     [9:0]   : payload_length (DWs, actual payload written - may be less than TLP if truncated)
+#     [9:0]   : payload_length (DWs from TLP header; 0 for no-payload TLPs)
 #     [13:10] : tlp_type
 #     [14]    : direction (0=RX, 1=TX)
 #     [15]    : truncated (1 if payload was truncated due to FIFO backpressure)

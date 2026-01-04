@@ -9,8 +9,8 @@
 #
 # Design:
 # - On first beat: check header FIFO ready, latch header fields, start payload
-# - On all beats: write payload to FIFO, track actual beats written
-# - On last beat: write header with actual payload length and truncated flag
+# - On all beats: write payload to FIFO, track truncation
+# - On last beat: write header with TLP length and truncated flag
 # - If header FIFO not ready on first beat: drop entire packet
 #
 
@@ -33,7 +33,7 @@ class TLPCaptureEngine(LiteXModule):
     Captures TLPs from tap points and streams to header/payload FIFOs.
 
     Robust design with truncation handling:
-    - Header written on LAST beat (not first) with actual payload length
+    - Header written on LAST beat (not first) with TLP payload length
     - If payload FIFO backpressures mid-packet, packet is truncated (not dropped)
     - Truncated flag in header indicates partial capture
     - If header FIFO full on first beat, entire packet is dropped
@@ -263,7 +263,6 @@ class TLPCaptureEngine(LiteXModule):
         dropping = Signal()
 
         # Payload tracking
-        payload_beats_written = Signal(10)  # Count of 64-bit beats successfully written
         payload_truncated = Signal()        # Set if any payload beat failed
 
         # =====================================================================
@@ -453,12 +452,6 @@ class TLPCaptureEngine(LiteXModule):
                     # Header FIFO has room - proceed with capture
                     dropping.eq(0),
 
-                    # Initialize and count first beat in one step
-                    If(payload_write_success,
-                        payload_beats_written.eq(1),
-                    ).Else(
-                        payload_beats_written.eq(0),
-                    ),
                     payload_truncated.eq(payload_write_failed),
 
                     # Latch header fields
@@ -491,11 +484,8 @@ class TLPCaptureEngine(LiteXModule):
                 ),
             ),
 
-            # Track payload writes on non-first beats (when not dropping)
+            # Track payload write failures on non-first beats (when not dropping)
             If(any_beat & ~first_beat & ~dropping,
-                If(payload_write_success,
-                    payload_beats_written.eq(payload_beats_written + 1),
-                ),
                 If(payload_write_failed,
                     payload_truncated.eq(1),
                 ),
