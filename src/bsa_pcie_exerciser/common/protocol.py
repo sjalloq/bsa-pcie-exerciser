@@ -110,7 +110,7 @@ class Direction(IntEnum):
 #     [9:0]   : payload_length (DW count)
 #     [13:10] : tlp_type
 #     [14]    : direction (0=RX, 1=TX)
-#     [15]    : reserved
+#     [15]    : truncated (1 if payload truncated due to FIFO backpressure)
 #     [31:16] : header_word_count (always 4)
 #     [63:32] : timestamp[31:0]
 #
@@ -131,7 +131,9 @@ class Direction(IntEnum):
 #     [7:6]   : at
 #     [8]     : pasid_valid (TX) / reserved (RX)
 #     [28:9]  : pasid (TX) / reserved (RX)
-#     [31:29] : status (completions)
+#     [29]    : privileged (TX requests) / status[0] (completions)
+#     [30]    : execute (TX requests) / status[1] (completions)
+#     [31]    : status[2] (completions) / reserved (TX requests)
 #     [47:32] : cmp_id (completions)
 #     [59:48] : byte_count (completions)
 #     [63:60] : reserved
@@ -156,6 +158,7 @@ class TLPPacket:
     payload_length: int   # DW count
     tlp_type: int
     direction: int
+    truncated: bool
     header_words: int
     timestamp: int        # 64-bit timestamp
 
@@ -175,6 +178,8 @@ class TLPPacket:
     at: int
     pasid_valid: bool
     pasid: int
+    privileged: bool      # PMR - Privileged Mode Requested (TX requests only)
+    execute: bool         # ER - Execute Requested (TX requests only)
     status: int           # Completion status
     cmp_id: int           # Completer ID
     byte_count: int       # Completion byte count
@@ -280,6 +285,7 @@ def parse_tlp_header(data: bytes) -> Optional[dict]:
     payload_length = h0 & 0x3FF              # [9:0]
     tlp_type = (h0 >> 10) & 0xF              # [13:10]
     direction = (h0 >> 14) & 0x1             # [14]
+    truncated = bool((h0 >> 15) & 0x1)       # [15]
     header_words = (h0 >> 16) & 0xFFFF       # [31:16]
     timestamp_lo = (h0 >> 32) & 0xFFFFFFFF   # [63:32]
 
@@ -303,7 +309,9 @@ def parse_tlp_header(data: bytes) -> Optional[dict]:
     at = (h3 >> 6) & 0x3                     # [7:6]
     pasid_valid = bool((h3 >> 8) & 0x1)      # [8]
     pasid = (h3 >> 9) & 0xFFFFF              # [28:9]
-    status = (h3 >> 29) & 0x7                # [31:29]
+    privileged = bool((h3 >> 29) & 0x1)     # [29] TX requests
+    execute = bool((h3 >> 30) & 0x1)        # [30] TX requests
+    status = (h3 >> 29) & 0x7                # [31:29] completions (overlaps priv/exec)
     cmp_id = (h3 >> 32) & 0xFFFF             # [47:32]
     byte_count = (h3 >> 48) & 0xFFF          # [59:48]
 
@@ -311,6 +319,7 @@ def parse_tlp_header(data: bytes) -> Optional[dict]:
         'payload_length': payload_length,
         'tlp_type': tlp_type,
         'direction': direction,
+        'truncated': truncated,
         'header_words': header_words,
         'timestamp': timestamp,
         'address': address,
@@ -324,6 +333,8 @@ def parse_tlp_header(data: bytes) -> Optional[dict]:
         'at': at,
         'pasid': pasid,
         'pasid_valid': pasid_valid,
+        'privileged': privileged,
+        'execute': execute,
         'status': status,
         'byte_count': byte_count,
         'cmp_id': cmp_id,
@@ -366,6 +377,7 @@ def parse_tlp_packet(data: bytes) -> Optional[TLPPacket]:
         payload_length=header['payload_length'],
         tlp_type=header['tlp_type'],
         direction=header['direction'],
+        truncated=header['truncated'],
         header_words=header['header_words'],
         timestamp=header['timestamp'],
         address=header['address'],
@@ -379,6 +391,8 @@ def parse_tlp_packet(data: bytes) -> Optional[TLPPacket]:
         at=header['at'],
         pasid=header['pasid'],
         pasid_valid=header['pasid_valid'],
+        privileged=header['privileged'],
+        execute=header['execute'],
         status=header['status'],
         byte_count=header['byte_count'],
         cmp_id=header['cmp_id'],
@@ -478,6 +492,7 @@ def packet_to_dict(pkt: TLPPacket) -> dict:
         'req_id': f"0x{pkt.req_id:04x}",
         'tag': pkt.tag,
         'payload_length': pkt.payload_length,
+        'truncated': pkt.truncated,
     }
 
     if pkt.is_completion:

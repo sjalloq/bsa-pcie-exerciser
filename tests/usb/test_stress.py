@@ -47,6 +47,8 @@ REG_USB_MON_RX_CAPTURED = 0x088
 REG_USB_MON_RX_DROPPED = 0x08C
 REG_USB_MON_TX_CAPTURED = 0x090
 REG_USB_MON_TX_DROPPED = 0x094
+REG_USB_MON_RX_TRUNCATED = 0x098
+REG_USB_MON_TX_TRUNCATED = 0x09C
 
 
 # =============================================================================
@@ -108,6 +110,8 @@ async def get_monitor_stats(usb_bfm: USBBFM) -> dict:
         'rx_dropped': await usb_bfm.send_etherbone_read(REG_USB_MON_RX_DROPPED),
         'tx_captured': await usb_bfm.send_etherbone_read(REG_USB_MON_TX_CAPTURED),
         'tx_dropped': await usb_bfm.send_etherbone_read(REG_USB_MON_TX_DROPPED),
+        'rx_truncated': await usb_bfm.send_etherbone_read(REG_USB_MON_RX_TRUNCATED),
+        'tx_truncated': await usb_bfm.send_etherbone_read(REG_USB_MON_TX_TRUNCATED),
     }
 
 
@@ -191,9 +195,9 @@ async def test_stress_rx_flood(dut):
                   f"captured={stats['rx_captured']}, dropped={stats['rx_dropped']}, "
                   f"received={len(packets)}")
 
-    # Some drops are acceptable under flood, but we should capture most
-    assert stats['rx_captured'] + stats['rx_dropped'] >= STRESS_PACKET_COUNT * 0.9, \
-        "Too many packets lost"
+    total_accounted = stats['rx_captured'] + stats['rx_dropped']
+    assert total_accounted == STRESS_PACKET_COUNT, \
+        f"Packet accounting mismatch: captured+dropped={total_accounted}, injected={STRESS_PACKET_COUNT}"
 
     # Verify we can read what was captured
     assert len(packets) >= stats['rx_captured'] * 0.9, \
@@ -232,8 +236,20 @@ async def test_stress_rx_flood_with_payload(dut):
     packets = await drain_monitor_packets(usb_bfm)
     stats = await get_monitor_stats(usb_bfm)
 
-    dut._log.info(f"RX Flood (payload): captured={stats['rx_captured']}, "
-                  f"dropped={stats['rx_dropped']}, received={len(packets)}")
+    dut._log.info(
+        f"RX Flood (payload): captured={stats['rx_captured']}, "
+        f"dropped={stats['rx_dropped']}, truncated={stats['rx_truncated']}, "
+        f"received={len(packets)}"
+    )
+    total_accounted = stats['rx_captured'] + stats['rx_dropped']
+    assert total_accounted == STRESS_PACKET_COUNT, \
+        f"Packet accounting mismatch: captured+dropped={total_accounted}, injected={STRESS_PACKET_COUNT}"
+    assert stats['rx_captured'] > 0, "Expected some packets to be captured"
+    assert (stats['rx_dropped'] > 0) or (stats['rx_truncated'] > 0), \
+        "Expected drops or truncation under payload flood"
+    if stats['rx_truncated'] > 0:
+        assert any(pkt.truncated for pkt in packets), \
+            "Expected at least one truncated packet when rx_truncated increments"
 
 
 # =============================================================================
@@ -673,6 +689,7 @@ async def test_stress_packet_integrity(dut):
 
     # Receive and verify
     packets = await drain_monitor_packets(usb_bfm)
+    stats = await get_monitor_stats(usb_bfm)
 
     # Debug: show first few packets
     for i, pkt in enumerate(packets[:5]):
@@ -688,6 +705,9 @@ async def test_stress_packet_integrity(dut):
                 break
 
     dut._log.info(f"Integrity check: {matched}/{len(expected)} packets matched")
+    total_accounted = stats['rx_captured'] + stats['rx_dropped']
+    assert total_accounted == len(expected), \
+        f"Packet accounting mismatch: captured+dropped={total_accounted}, injected={len(expected)}"
 
     # Allow some drops but most should match
     assert matched >= len(expected) * 0.9, \
@@ -728,14 +748,18 @@ async def test_stress_width_converter_boundary(dut):
 
         # Receive and verify
         pkt_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
-        if pkt_data:
-            pkt = parse_monitor_packet_safe(pkt_data)
-            if pkt and pkt.payload_length:
-                expected_dw = (size + 3) // 4
-                dut._log.info(f"Size {size}: captured payload_length={pkt.payload_length}, "
-                              f"expected={expected_dw}")
-        else:
-            dut._log.warning(f"Size {size}: no packet received")
+        assert pkt_data is not None, f"Expected to capture packet for size {size}"
+
+        pkt = parse_monitor_packet_safe(pkt_data)
+        assert pkt is not None, f"Failed to parse packet for size {size}"
+
+        expected_dw = (size + 3) // 4
+        dut._log.info(
+            f"Size {size}: captured payload_length={pkt.payload_length}, "
+            f"expected={expected_dw}"
+        )
+        assert pkt.payload_length == expected_dw, \
+            f"Payload length mismatch for size {size}: got {pkt.payload_length}, expected {expected_dw}"
 
     stats = await get_monitor_stats(usb_bfm)
     dut._log.info(f"Width converter test: {stats}")

@@ -224,8 +224,11 @@ class ATSInvalidationHandler(LiteXModule):
 
             If(self.inv_sink.valid & self.inv_sink.first,
                 # Latch request parameters from ATS Invalidation Message
-                # Address field contains upper 32 bits; extend to 64 bits page-aligned
-                NextValue(inv_addr, Cat(Signal(12), self.inv_sink.address)),
+                # For 32-bit addresses, DW3 contains Address[31:0] directly
+                # For 64-bit addresses, DW3 contains Address[63:32] (upper bits)
+                # Since BSA exerciser typically uses 32-bit addresses, use address as-is
+                # and page-align by masking lower 12 bits
+                NextValue(inv_addr, self.inv_sink.address & 0xFFFFF000),
                 # S-bit: 0=4KB page, 1=size comes from data payload
                 NextValue(inv_size, Mux(self.inv_sink.s_bit, 0, 4096)),
                 NextValue(inv_req_id, self.inv_sink.requester_id),

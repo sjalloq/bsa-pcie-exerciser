@@ -59,7 +59,7 @@ REG_ATS_RANGE_SIZE = 0x30   # ATS range size (read-only)
 # [6]:     dmapasiden      - PASID Enable
 # [7]:     dmaIsPrivileged - Privileged access mode
 # [8]:     dmaIsInstruction - Instruction access
-# [9]:     dmaUseATCforTranslation - Use ATC
+# [9]:     dmaUseATCforTranslation - Use ATC for translation
 # [11:10]: dmaAddressType  - Address type (0=Untranslated, 2=Translated)
 
 DMACTL_TRIGGER     = (1 << 0)   # [3:0] Trigger (write 1 to trigger, auto-clears)
@@ -1177,9 +1177,8 @@ async def test_atc_software_invalidation(dut):
     address = extract_address_from_tlp(dma_tlp)
     dut._log.info(f"DMA address before invalidation: 0x{address:08X}")
 
-    if address != translated_pa:
-        dut._log.warning(f"Expected translated address 0x{translated_pa:08X}, got 0x{address:08X}")
-        # Continue with test even if ATC hit failed
+    assert address == translated_pa, \
+        f"ATC not working: expected translated address 0x{translated_pa:08X}, got 0x{address:08X}"
 
     dut._log.info("Step 3: Clear ATC via ATSCTL")
     await write_bar0_register(bfm, REG_ATSCTL, ATSCTL_CLEAR_ATC)
@@ -1199,19 +1198,10 @@ async def test_atc_software_invalidation(dut):
     dut._log.info(f"DMA address after invalidation: 0x{address2:08X}")
 
     # After invalidation, should use untranslated address
-    if address2 == test_va:
-        dut._log.info("PASS: ATC was invalidated, DMA uses untranslated address")
-    elif address2 == translated_pa:
-        dut._log.warning(
-            f"ATC still contains translation after clear\n"
-            f"  Expected: untranslated 0x{test_va:08X}\n"
-            f"  Got:      translated 0x{translated_pa:08X}"
-        )
-        # Not a hard failure - may be implementation detail
-    else:
-        dut._log.warning(f"Unexpected address: 0x{address2:08X}")
+    assert address2 == test_va, \
+        f"ATC invalidation failed: expected untranslated 0x{test_va:08X}, got 0x{address2:08X}"
 
-    dut._log.info("test_atc_software_invalidation PASSED")
+    dut._log.info("PASS: ATC was invalidated, DMA uses untranslated address")
 
 
 @cocotb.test()

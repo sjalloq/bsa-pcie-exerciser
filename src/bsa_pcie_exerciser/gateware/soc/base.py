@@ -279,6 +279,9 @@ class BSAExerciserSoC(SoCMini):
             self.dma_engine.pasid_val.eq(self.bsa_regs.pasid_val[:20]),
             self.dma_engine.privileged.eq(self.bsa_regs.dma_privileged),
             self.dma_engine.instruction.eq(self.bsa_regs.dma_instruction),
+            # Requester ID override (for ACS testing - BSA e001)
+            self.dma_engine.rid_override_valid.eq(self.bsa_regs.rid_override_valid),
+            self.dma_engine.rid_override_value.eq(self.bsa_regs.rid_override_value),
         ]
 
         # Connect DMA engine status signals to BSA registers
@@ -419,9 +422,7 @@ class BSAExerciserSoC(SoCMini):
         )
 
         # Update invalidated status from both sources
-        self.comb += self.bsa_regs.ats_invalidated.eq(
-            self.ats_engine.invalidated | self.atc.invalidated
-        )
+        self.comb += self.bsa_regs.ats_invalidated.eq(self.atc.invalidated)
 
         # Connect invalidation handler RX path to depacketizer ATS_INV source
         self.comb += self.pcie_endpoint.ats_inv_source.connect(

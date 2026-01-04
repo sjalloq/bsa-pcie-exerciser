@@ -123,13 +123,14 @@ async def test_tx_monitor_completion(dut):
     # Capture monitor packet
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        dut._log.info(f"Captured TX TLP: type={pkt.type_name}, dir={pkt.direction}")
-        # Completion should be TX direction
-        assert pkt.direction == Direction.TX, f"Expected TX direction"
-    else:
-        dut._log.info("No TX monitor packet received (completion may not be routed to monitor)")
+    assert packet_data is not None, "Expected to capture TX completion TLP"
+
+    pkt = parse_monitor_packet(packet_data)
+    dut._log.info(f"Captured TX TLP: type={pkt.type_name}, dir={pkt.direction}")
+    # Completion should be TX direction
+    assert pkt.direction == Direction.TX, "Expected TX direction"
+    assert pkt.tlp_type in (TLP_TYPE_CPL, TLP_TYPE_CPLD), \
+        f"Expected completion TLP, got {pkt.type_name}"
 
 
 @cocotb.test()
@@ -144,7 +145,6 @@ async def test_tx_monitor_dma_read(dut):
     """
     await reset_dut(dut)
     usb_bfm = USBBFM(dut)
-    pcie_bfm = PCIeBFM(dut)
 
     await enable_tx_monitoring(usb_bfm)
 
@@ -166,14 +166,73 @@ async def test_tx_monitor_dma_read(dut):
     # Capture monitor packet
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        dut._log.info(f"Captured DMA TLP: type={pkt.type_name}, addr=0x{pkt.address:X}")
-        assert pkt.direction == Direction.TX
-        if pkt.tlp_type == TLP_TYPE_MRD:
-            dut._log.info(f"DMA read request captured: addr=0x{pkt.address:016X}")
-    else:
-        dut._log.info("No DMA TLP captured (DMA engine may need completion to proceed)")
+    assert packet_data is not None, "Expected to capture DMA read TLP"
+
+    pkt = parse_monitor_packet(packet_data)
+    dut._log.info(f"Captured DMA TLP: type={pkt.type_name}, addr=0x{pkt.address:X}")
+    assert pkt.direction == Direction.TX, "Expected TX direction"
+    assert pkt.tlp_type == TLP_TYPE_MRD, f"Expected MRd TLP, got {pkt.type_name}"
+    dut._log.info(f"DMA read request captured: addr=0x{pkt.address:016X}")
+
+
+# MSI-X Table entry offsets (relative to BAR2)
+# Each entry is 16 bytes: addr_lo(4) + addr_hi(4) + data(4) + vector_control(4)
+MSIX_ENTRY_SIZE = 16
+MSIX_ADDR_LO_OFFSET = 0
+MSIX_ADDR_HI_OFFSET = 4
+MSIX_DATA_OFFSET = 8
+MSIX_VECTOR_CTRL_OFFSET = 12
+
+
+async def configure_msix_entry(pcie_bfm, entry: int, address: int, data: int, masked: bool = False):
+    """
+    Configure an MSI-X table entry via BAR2 write.
+
+    Args:
+        pcie_bfm: PCIe BFM instance
+        entry: Vector number (0-2047)
+        address: Target address for MSI write
+        data: Data value for MSI write
+        masked: If True, mask this vector
+    """
+    base_offset = entry * MSIX_ENTRY_SIZE
+
+    # Write addr_lo
+    beats = TLPBuilder.memory_write_32(
+        address=base_offset + MSIX_ADDR_LO_OFFSET,
+        data_bytes=(address & 0xFFFFFFFF).to_bytes(4, 'little'),
+        requester_id=0x0100,
+        tag=0,
+    )
+    await pcie_bfm.inject_tlp(beats, bar_hit=0b000100)  # BAR2
+
+    # Write addr_hi
+    beats = TLPBuilder.memory_write_32(
+        address=base_offset + MSIX_ADDR_HI_OFFSET,
+        data_bytes=((address >> 32) & 0xFFFFFFFF).to_bytes(4, 'little'),
+        requester_id=0x0100,
+        tag=0,
+    )
+    await pcie_bfm.inject_tlp(beats, bar_hit=0b000100)
+
+    # Write data
+    beats = TLPBuilder.memory_write_32(
+        address=base_offset + MSIX_DATA_OFFSET,
+        data_bytes=data.to_bytes(4, 'little'),
+        requester_id=0x0100,
+        tag=0,
+    )
+    await pcie_bfm.inject_tlp(beats, bar_hit=0b000100)
+
+    # Write vector control (bit 0 = mask)
+    ctrl = 1 if masked else 0
+    beats = TLPBuilder.memory_write_32(
+        address=base_offset + MSIX_VECTOR_CTRL_OFFSET,
+        data_bytes=ctrl.to_bytes(4, 'little'),
+        requester_id=0x0100,
+        tag=0,
+    )
+    await pcie_bfm.inject_tlp(beats, bar_hit=0b000100)
 
 
 @cocotb.test()
@@ -181,7 +240,7 @@ async def test_tx_monitor_msix_write(dut):
     """
     Capture outbound MSI-X write.
 
-    1. Configure MSI-X table entry
+    1. Configure MSI-X table entry via BAR2
     2. Trigger interrupt via software
     3. Capture MSI-X memory write TLP
     """
@@ -191,8 +250,12 @@ async def test_tx_monitor_msix_write(dut):
 
     await enable_tx_monitoring(usb_bfm)
 
-    # Note: MSI-X configuration requires setting up the MSI-X table via BAR2
-    # For this test, we try to trigger vector 0 and see if we capture anything
+    # Configure MSI-X vector 0 with a known address and data
+    msix_addr = 0xFEE00000  # Typical MSI address
+    msix_data = 0x12345678
+    await configure_msix_entry(pcie_bfm, entry=0, address=msix_addr, data=msix_data, masked=False)
+
+    await ClockCycles(dut.sys_clk, 100)
 
     # Trigger MSI-X vector 0
     # MSICTL: [10:0]=vector, [31]=trigger
@@ -202,13 +265,13 @@ async def test_tx_monitor_msix_write(dut):
 
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        dut._log.info(f"Captured TLP: type={pkt.type_name}, addr=0x{pkt.address:X}")
-        if pkt.tlp_type == TLP_TYPE_MWR or pkt.tlp_type == TLP_TYPE_MSIX:
-            dut._log.info(f"MSI-X write captured: addr=0x{pkt.address:016X}")
-    else:
-        dut._log.info("No MSI-X TLP captured (table may not be configured)")
+    assert packet_data is not None, "Expected to capture MSI-X TLP"
+
+    pkt = parse_monitor_packet(packet_data)
+    dut._log.info(f"Captured TLP: type={pkt.type_name}, addr=0x{pkt.address:X}")
+    assert pkt.direction == Direction.TX, "Expected TX direction"
+    assert pkt.tlp_type == TLP_TYPE_MWR, f"Expected MWr TLP for MSI-X, got {pkt.type_name}"
+    dut._log.info(f"MSI-X write captured: addr=0x{pkt.address:016X}")
 
 
 @cocotb.test()
@@ -218,7 +281,6 @@ async def test_tx_monitor_dma_with_no_snoop(dut):
     """
     await reset_dut(dut)
     usb_bfm = USBBFM(dut)
-    pcie_bfm = PCIeBFM(dut)
 
     await enable_tx_monitoring(usb_bfm)
 
@@ -237,13 +299,16 @@ async def test_tx_monitor_dma_with_no_snoop(dut):
 
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        dut._log.info(f"Captured TLP: type={pkt.type_name}, attr=0b{pkt.attr:02b}")
-        if pkt.tlp_type == TLP_TYPE_MRD:
-            # Check No-Snoop bit in attr
-            ns_bit = pkt.attr & 1
-            dut._log.info(f"No-Snoop bit in captured TLP: {ns_bit}")
+    assert packet_data is not None, "Expected to capture DMA TLP with No-Snoop"
+
+    pkt = parse_monitor_packet(packet_data)
+    dut._log.info(f"Captured TLP: type={pkt.type_name}, attr=0b{pkt.attr:02b}")
+    assert pkt.tlp_type == TLP_TYPE_MRD, f"Expected MRd TLP, got {pkt.type_name}"
+
+    # Check No-Snoop bit in attr (bit 0)
+    ns_bit = pkt.attr & 1
+    dut._log.info(f"No-Snoop bit in captured TLP: {ns_bit}")
+    assert ns_bit == 1, "Expected No-Snoop bit to be set"
 
 
 @cocotb.test()
@@ -253,7 +318,6 @@ async def test_tx_monitor_pasid_prefix(dut):
     """
     await reset_dut(dut)
     usb_bfm = USBBFM(dut)
-    pcie_bfm = PCIeBFM(dut)
 
     await enable_tx_monitoring(usb_bfm)
 
@@ -274,11 +338,14 @@ async def test_tx_monitor_pasid_prefix(dut):
 
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        dut._log.info(f"Captured TLP: type={pkt.type_name}, pasid_valid={pkt.pasid_valid}")
-        if pkt.pasid_valid:
-            dut._log.info(f"PASID captured: 0x{pkt.pasid:05X}")
+    assert packet_data is not None, "Expected to capture DMA TLP with PASID"
+
+    pkt = parse_monitor_packet(packet_data)
+    dut._log.info(f"Captured TLP: type={pkt.type_name}, pasid_valid={pkt.pasid_valid}")
+    assert pkt.pasid_valid, "Expected PASID prefix in captured TLP"
+    assert pkt.pasid == pasid_value, \
+        f"Expected PASID 0x{pasid_value:05X}, got 0x{pkt.pasid:05X}"
+    dut._log.info(f"PASID captured: 0x{pkt.pasid:05X}")
 
 
 @cocotb.test()

@@ -139,10 +139,29 @@ class LitePCIeMSIXTable(Module):
         # Combine first_be and last_be into 8-bit byte enable for 64-bit memory
         # first_be: bytes 0-3 (lower DWORD)
         # last_be: bytes 4-7 (upper DWORD)
+        #
+        # Special case: single-DWORD write to upper DWORD (addr[2]=1)
+        # In this case, first_be applies to bytes 4-7 and data must be shifted.
+        # The 32-bit data arrives in lower 32 bits of the 64-bit bus but needs
+        # to be written to the upper 32 bits of the QWORD.
+        upper_dword_write = Signal()
         write_be = Signal(8)
+        write_data = Signal(64)
+
         self.comb += [
-            write_be.eq(Cat(req_sink.first_be, req_sink.last_be)),
-            port_a.dat_w.eq(req_sink.dat),
+            # Detect single-DWORD write to upper half of QWORD
+            upper_dword_write.eq((req_sink.len == 1) & req_sink.adr[2]),
+
+            If(upper_dword_write,
+                # Single DWORD to upper half: shift BE and data
+                write_be.eq(Cat(Constant(0, 4), req_sink.first_be)),
+                write_data.eq(Cat(Constant(0, 32), req_sink.dat[0:32])),
+            ).Else(
+                # Normal: first_be -> bytes 0-3, last_be -> bytes 4-7
+                write_be.eq(Cat(req_sink.first_be, req_sink.last_be)),
+                write_data.eq(req_sink.dat),
+            ),
+            port_a.dat_w.eq(write_data),
         ]
 
         # ---------------------------------------------------------------------

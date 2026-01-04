@@ -194,7 +194,7 @@ async def test_random_bar0(dut):
             else:
                 timeouts += 1
                 cov.sample('bar0_completion', False)
-                dut._log.warning(f"[{i}] No completion for read at 0x{offset:02X}")
+                dut._log.error(f"[{i}] No completion for read at 0x{offset:02X}")
 
         # Random delay
         await ClockCycles(dut.sys_clk, rand.random_delay(1, 8))
@@ -205,9 +205,9 @@ async def test_random_bar0(dut):
     if tag_errors > 0:
         raise AssertionError(f"Tag verification failed: {tag_errors} mismatches")
 
-    # Allow some timeouts (may indicate back-pressure or timing issues)
-    if timeouts > N_TRANSACTIONS * 0.1:
-        raise AssertionError(f"Too many timeouts: {timeouts}/{N_TRANSACTIONS}")
+    # Fail on any timeouts - completions should always arrive for valid register reads
+    if timeouts > 0:
+        raise AssertionError(f"Completion timeouts: {timeouts}/{N_TRANSACTIONS} reads failed")
 
 
 @cocotb.test()
@@ -554,11 +554,15 @@ async def test_random_attributes(dut):
             await ClockCycles(dut.sys_clk, 20)
         else:
             timeouts += 1
-            dut._log.warning(f"[{i}] DMA request timeout")
+            dut._log.error(f"[{i}] DMA request timeout")
 
         await ClockCycles(dut.sys_clk, rand.random_delay(3, 10))
 
     dut._log.info(f"Completed {n_ops} DMA ops: {attr_errors} attr errors, {at_errors} AT errors, {timeouts} timeouts")
+
+    # Fail if any DMA requests timed out - indicates DMA engine not generating TLPs
+    if timeouts > 0:
+        raise AssertionError(f"DMA request timeouts: {timeouts}/{n_ops} - DMA engine failed to generate TLPs")
 
     if attr_errors > 0 or at_errors > 0:
         raise AssertionError(f"TLP attribute verification failed: {attr_errors} attr, {at_errors} AT errors")
@@ -652,8 +656,9 @@ async def test_backpressure_stress(dut):
     if tag_errors > 0:
         raise AssertionError(f"Tag verification failed: {tag_errors} mismatches")
 
+    # Allow some drops - USB monitor is best-effort and can't backpressure PCIe
     if success < 24:  # 80% success rate minimum
-        raise AssertionError(f"Too many timeouts under back-pressure: {timeouts}/30")
+        raise AssertionError(f"Too many drops under back-pressure: {timeouts}/30")
 
 
 @cocotb.test()
@@ -957,6 +962,8 @@ async def test_completion_timeout_recovery(dut):
     dut._log.info("Initial read succeeded")
 
     # Now issue several reads in quick succession (simulating potential stress)
+    # All must succeed to prove system is still responsive
+    failures = 0
     for i in range(5):
         beats = TLPBuilder.memory_read_32(REG_ID, length_dw=1, tag=10 + i)
         await bfm.inject_tlp(beats, bar_hit=0b000001)
@@ -965,9 +972,14 @@ async def test_completion_timeout_recovery(dut):
         if cpl:
             cov.sample('recovery_read_ok', True)
         else:
+            failures += 1
             cov.sample('recovery_read_ok', False)
+            dut._log.error(f"Post-stress read {i} failed - system not responsive")
 
         await ClockCycles(dut.sys_clk, 3)
+
+    if failures > 0:
+        raise AssertionError(f"Recovery test failed: {failures}/5 reads timed out after stress")
 
     dut._log.info("Recovery test completed - system remains responsive")
 

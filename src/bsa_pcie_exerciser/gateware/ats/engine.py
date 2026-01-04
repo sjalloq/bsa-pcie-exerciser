@@ -73,9 +73,6 @@ class ATSEngine(LiteXModule):
     cacheable : Signal, out
         Translation result is cacheable (R/W != 0).
 
-    invalidated : Signal, out
-        ATC was invalidated.
-
     translated_addr : Signal(64), out
         Translated physical address.
 
@@ -114,7 +111,6 @@ class ATSEngine(LiteXModule):
         self.in_flight   = Signal()          # Request in progress
         self.success     = Signal()          # Translation successful
         self.cacheable   = Signal()          # Result cacheable (RW != 0)
-        self.invalidated = Signal()          # ATC was invalidated
 
         # =====================================================================
         # Result Interface (to BSARegisters and ATC)
@@ -207,7 +203,6 @@ class ATSEngine(LiteXModule):
                 NextValue(current_exec_req, self.exec_req),
                 # Clear previous status
                 NextValue(self.success, 0),
-                NextValue(self.invalidated, 0),
                 NextState("SEND_REQ"),
             ),
         )

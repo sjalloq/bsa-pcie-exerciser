@@ -65,13 +65,25 @@ def get_platform_config(platform_name):
     return config
 
 
+def get_bitstream_path(platform, output_dir, mode="bit"):
+    """Get path to bitstream file.
+
+    Args:
+        platform: Platform name
+        output_dir: Build output directory
+        mode: "bit" for SRAM, "bin" for flash
+
+    Returns:
+        Path to bitstream file
+    """
+    build_dir = output_dir or f"build/{platform}"
+    ext = "bit" if mode == "bit" else "bin"
+    return os.path.join(build_dir, "gateware", f"{platform}.{ext}")
+
+
 # =============================================================================
 # CLI
 # =============================================================================
-
-# Configure rich_click styling
-# click.rich_click.USE_MARKDOWN = True
-# click.rich_click.USE_RICH_MARKUP = False
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
@@ -80,7 +92,7 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 def cli():
     """BSA PCIe Exerciser CLI Tool
 
-    This tool can be used to build and flash supported boards.
+    Build, load, and flash BSA PCIe Exerciser gateware to supported FPGA boards.
     """
     pass
 
@@ -89,6 +101,7 @@ def cli():
 @click.option("--platform", "-p", type=click.Choice(list(PLATFORMS.keys()), case_sensitive=False), default="squirrel", show_default=True, help="Target platform")
 @click.option("--output-dir", "-o", type=click.Path(), default=None, help="Build output directory (default: build/<platform>)")
 def build(platform, output_dir):
+    """Build gateware for the specified platform."""
 
     # Get platform configuration
     config = get_platform_config(platform)
@@ -120,6 +133,102 @@ def build(platform, output_dir):
     builder.build()
 
     click.echo(f"[bold green]Build complete![/] Output: {build_output_dir}")
+
+
+@cli.command(context_settings=CONTEXT_SETTINGS)
+@click.option("--platform", "-p", type=click.Choice(list(PLATFORMS.keys()), case_sensitive=False), default="squirrel", show_default=True, help="Target platform")
+@click.option("--output-dir", "-o", type=click.Path(), default=None, help="Build output directory (default: build/<platform>)")
+@click.option("--bitstream", "-b", type=click.Path(exists=True), default=None, help="Path to bitstream file (default: build/<platform>/gateware/<platform>.bit)")
+def load(platform, output_dir, bitstream):
+    """Load bitstream to FPGA SRAM (volatile, lost on power cycle)."""
+
+    config = get_platform_config(platform)
+    platform_inst = config["Platform"](variant=config["variant"])
+
+    # Get bitstream path
+    if bitstream is None:
+        bitstream = get_bitstream_path(platform, output_dir, mode="bit")
+
+    if not os.path.exists(bitstream):
+        raise click.ClickException(
+            f"Bitstream not found: {bitstream}\n"
+            f"Run 'bsa-pcie-exerciser build -p {platform}' first."
+        )
+
+    click.echo(f"Loading [bold cyan]{bitstream}[/] to [bold green]{platform}[/] SRAM...")
+
+    prog = platform_inst.create_programmer()
+    prog.load_bitstream(bitstream)
+
+    click.echo("[bold green]Load complete![/]")
+
+
+@cli.command(context_settings=CONTEXT_SETTINGS)
+@click.option("--platform", "-p", type=click.Choice(list(PLATFORMS.keys()), case_sensitive=False), default="squirrel", show_default=True, help="Target platform")
+@click.option("--output-dir", "-o", type=click.Path(), default=None, help="Build output directory (default: build/<platform>)")
+@click.option("--bitstream", "-b", type=click.Path(exists=True), default=None, help="Path to bitstream file (default: build/<platform>/gateware/<platform>.bit)")
+@click.option("--address", "-a", type=str, default="0", help="Flash address offset (default: 0)")
+def flash(platform, output_dir, bitstream, address):
+    """Flash bitstream to SPI flash (persistent across power cycles).
+
+    Note: After flashing, power cycle or use PCIe hot-reset to load the new bitstream.
+    """
+
+    config = get_platform_config(platform)
+    platform_inst = config["Platform"](variant=config["variant"])
+
+    # Get bitstream path - use .bit for flash (openFPGALoader handles conversion)
+    if bitstream is None:
+        bitstream = get_bitstream_path(platform, output_dir, mode="bit")
+
+    if not os.path.exists(bitstream):
+        raise click.ClickException(
+            f"Bitstream not found: {bitstream}\n"
+            f"Run 'bsa-pcie-exerciser build -p {platform}' first."
+        )
+
+    # Parse address
+    try:
+        flash_address = int(address, 0)  # Accepts hex (0x...) or decimal
+    except ValueError:
+        raise click.ClickException(f"Invalid address: {address}")
+
+    click.echo(f"Flashing [bold cyan]{bitstream}[/] to [bold green]{platform}[/] SPI flash at 0x{flash_address:08X}...")
+    click.echo("[bold yellow]Warning:[/] Power cycle required after flashing to load new bitstream.")
+
+    prog = platform_inst.create_programmer()
+    prog.flash(flash_address, bitstream)
+
+    click.echo("[bold green]Flash complete![/] Power cycle the board to boot new bitstream.")
+
+
+@cli.command(context_settings=CONTEXT_SETTINGS)
+@click.option("--platform", "-p", type=click.Choice(list(PLATFORMS.keys()), case_sensitive=False), default="squirrel", show_default=True, help="Target platform")
+def detect(platform):
+    """Detect FPGA via JTAG (verify cable connection)."""
+
+    config = get_platform_config(platform)
+    platform_inst = config["Platform"](variant=config["variant"])
+
+    click.echo(f"Detecting FPGA for [bold green]{platform}[/]...")
+
+    prog = platform_inst.create_programmer()
+
+    # OpenFPGALoader detect is done via command line
+    import subprocess
+    cable = "ft2232" if platform == "squirrel" else "ft4232"
+    result = subprocess.run(
+        ["openFPGALoader", "-c", cable, "--detect"],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode == 0:
+        click.echo(result.stdout)
+        click.echo("[bold green]FPGA detected![/]")
+    else:
+        click.echo(result.stderr, err=True)
+        raise click.ClickException("Failed to detect FPGA. Check cable connection.")
 
 
 def main():

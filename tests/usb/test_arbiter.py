@@ -107,14 +107,15 @@ async def test_arbiter_rx_only(dut):
 
     # Capture packets
     rx_count = 0
-    for _ in range(3):
+    for i in range(3):
         packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=300)
-        if packet_data:
-            pkt = parse_monitor_packet(packet_data)
-            assert pkt.direction == Direction.RX, "Expected RX packet"
-            rx_count += 1
+        assert packet_data is not None, f"Expected to capture RX packet {i+1}/3"
+        pkt = parse_monitor_packet(packet_data)
+        assert pkt.direction == Direction.RX, "Expected RX packet"
+        rx_count += 1
 
     dut._log.info(f"Captured {rx_count} RX-only packets")
+    assert rx_count == 3, f"Expected to capture all 3 RX packets, got {rx_count}"
 
 
 @cocotb.test()
@@ -142,12 +143,10 @@ async def test_arbiter_tx_only(dut):
     # Try to capture TX packet
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        assert pkt.direction == Direction.TX, "Expected TX packet"
-        dut._log.info(f"Captured TX packet: type={pkt.type_name}")
-    else:
-        dut._log.info("No TX packet captured (may depend on completion path)")
+    assert packet_data is not None, "Expected to capture TX completion packet"
+    pkt = parse_monitor_packet(packet_data)
+    assert pkt.direction == Direction.TX, "Expected TX packet"
+    dut._log.info(f"Captured TX packet: type={pkt.type_name}")
 
 
 @cocotb.test()
@@ -191,6 +190,11 @@ async def test_arbiter_interleaved_traffic(dut):
 
     dut._log.info(f"Captured {len(rx_packets)} RX packets, {len(tx_packets)} TX packets")
 
+    # Should capture at least some RX packets (we injected 5 reads)
+    assert len(rx_packets) >= 4, f"Expected at least 4 RX packets, got {len(rx_packets)}"
+    # TX completions should also be generated
+    assert len(tx_packets) >= 4, f"Expected at least 4 TX completion packets, got {len(tx_packets)}"
+
 
 @cocotb.test()
 async def test_arbiter_packet_atomicity(dut):
@@ -220,14 +224,16 @@ async def test_arbiter_packet_atomicity(dut):
     # Capture the packet
     packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
 
-    if packet_data:
-        pkt = parse_monitor_packet(packet_data)
-        dut._log.info(f"Captured packet: type={pkt.type_name}, payload_len={pkt.payload_length}")
+    assert packet_data is not None, "Expected to capture multi-DWORD write packet"
 
-        # Verify payload is intact (not interleaved)
-        if pkt.payload:
-            payload_bytes = pkt.payload_bytes
-            dut._log.info(f"Payload: {payload_bytes.hex()}")
+    pkt = parse_monitor_packet(packet_data)
+    dut._log.info(f"Captured packet: type={pkt.type_name}, payload_len={pkt.payload_length}")
+
+    # Verify payload is present and intact (not interleaved)
+    assert pkt.payload is not None and len(pkt.payload) > 0, \
+        "Multi-DWORD write should have payload data"
+    payload_bytes = pkt.payload_bytes
+    dut._log.info(f"Payload: {payload_bytes.hex()}")
 
 
 @cocotb.test()
@@ -265,6 +271,10 @@ async def test_arbiter_under_load(dut):
         captured += 1
 
     dut._log.info(f"Captured {captured} packets under load")
+
+    # Should capture most of the injected TLPs
+    assert captured >= NUM_TLPS * 0.8, \
+        f"Expected to capture at least {int(NUM_TLPS * 0.8)} packets under load, got {captured}"
 
 
 @cocotb.test()
@@ -309,8 +319,9 @@ async def test_arbiter_fair_scheduling(dut):
 
     dut._log.info(f"Fair scheduling: RX={rx_seen}, TX={tx_seen}")
 
-    # Both should have some packets (if completion path is wired)
-    # Note: This may be architecture-dependent
+    # Both should have packets - RX reads and TX completions
+    assert rx_seen >= 4, f"Expected at least 4 RX packets, got {rx_seen}"
+    assert tx_seen >= 4, f"TX packets should not be starved, got {tx_seen}"
 
 
 @cocotb.test()
@@ -350,5 +361,11 @@ async def test_arbiter_counters(dut):
     final_rx = await usb_bfm.send_etherbone_read(REG_USB_MON_RX_CAPTURED)
     final_tx = await usb_bfm.send_etherbone_read(REG_USB_MON_TX_CAPTURED)
 
+    rx_delta = final_rx - initial_rx
+    tx_delta = final_tx - initial_tx
+
     dut._log.info(f"Final counters: RX={final_rx}, TX={final_tx}")
-    dut._log.info(f"Delta: RX=+{final_rx - initial_rx}, TX=+{final_tx - initial_tx}")
+    dut._log.info(f"Delta: RX=+{rx_delta}, TX=+{tx_delta}")
+
+    # Should have captured at least 3 RX packets
+    assert rx_delta >= 3, f"Expected RX counter to increment by at least 3, got {rx_delta}"

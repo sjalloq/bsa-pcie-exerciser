@@ -120,6 +120,8 @@ class USBMonitorSubsystem(LiteXModule):
         self.tx_req_at      = Signal(2)
         self.tx_req_pasid_valid = Signal()
         self.tx_req_pasid   = Signal(20)
+        self.tx_req_privileged = Signal()  # PMR (Privileged Mode Requested)
+        self.tx_req_execute = Signal()     # ER (Execute Requested)
 
         # Completion sink
         self.tx_cpl_valid   = Signal()
@@ -253,6 +255,8 @@ class USBMonitorSubsystem(LiteXModule):
             tx_capture.tap_req_at.eq(self.tx_req_at),
             tx_capture.tap_req_pasid_valid.eq(self.tx_req_pasid_valid),
             tx_capture.tap_req_pasid.eq(self.tx_req_pasid),
+            tx_capture.tap_req_privileged.eq(self.tx_req_privileged),
+            tx_capture.tap_req_execute.eq(self.tx_req_execute),
 
             # Completion tap
             tx_capture.tap_cpl_valid.eq(self.tx_cpl_valid),

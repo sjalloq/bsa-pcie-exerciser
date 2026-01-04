@@ -92,12 +92,10 @@ async def drain_monitor_packets(usb_bfm: USBBFM, max_packets=1000,
         data = await usb_bfm.receive_monitor_packet(timeout_cycles=timeout_per_packet, debug=debug)
         if data is None:
             break
-        try:
-            pkt = parse_tlp_packet(data)
-            if pkt:
-                packets.append(pkt)
-        except Exception:
-            pass
+        pkt = parse_tlp_packet(data)
+        if pkt is None:
+            raise AssertionError("Malformed monitor packet encountered during drain")
+        packets.append(pkt)
     return packets
 
 
@@ -374,6 +372,8 @@ async def test_payload_size_sweep(dut):
     for pkt in packets:
         expected_dw = (pkt.tag + 3) // 4  # tag = size in bytes
         dut._log.info(f"Tag {pkt.tag}: payload_length={pkt.payload_length}, expected={expected_dw}")
+        assert pkt.payload_length == expected_dw, \
+            f"Payload length mismatch for size {pkt.tag}: got {pkt.payload_length}, expected {expected_dw}"
 
 
 # =============================================================================

@@ -82,6 +82,10 @@ class BSADMAEngine(LiteXModule):
         self.privileged  = Signal()          # Privileged Mode Requested (PMR)
         self.instruction = Signal()          # Instruction access (maps to Execute)
 
+        # Requester ID override (for ACS testing - BSA e001)
+        self.rid_override_valid = Signal()   # Enable requester ID override
+        self.rid_override_value = Signal(16) # Spoofed requester ID value
+
         # =====================================================================
         # Status Interface (to BSARegisters)
         # =====================================================================
@@ -134,6 +138,10 @@ class BSADMAEngine(LiteXModule):
         current_pasid_val = Signal(20)       # Latched PASID value
         current_priv      = Signal()         # Latched privileged mode
         current_exec      = Signal()         # Latched execute (instruction)
+
+        # Latched Requester ID override
+        current_rid_override_valid = Signal()   # Latched RID override enable
+        current_rid_override_value = Signal(16) # Latched RID override value
 
         # Per-TLP tracking
         tlp_len_bytes  = Signal(10)          # Bytes in current TLP (max 512)
@@ -220,6 +228,9 @@ class BSADMAEngine(LiteXModule):
                 NextValue(current_pasid_val, self.pasid_val),
                 NextValue(current_priv, self.privileged),
                 NextValue(current_exec, self.instruction),
+                # Latch Requester ID override
+                NextValue(current_rid_override_valid, self.rid_override_valid),
+                NextValue(current_rid_override_value, self.rid_override_value),
                 NextState("SETUP"),
             ),
         )
@@ -258,7 +269,10 @@ class BSADMAEngine(LiteXModule):
         # Common TLP header fields
         self.comb += [
             source.channel.eq(0),
-            source.req_id.eq(phy.id),
+            # Requester ID: use override value when enabled, else use PHY's native ID
+            source.req_id.eq(Mux(current_rid_override_valid,
+                                  current_rid_override_value,
+                                  phy.id)),
             source.tag.eq(current_tag),
             source.attr.eq(Cat(current_ns, 0)),  # [0]=No-Snoop, [1]=RO (unused)
             source.at.eq(current_at),

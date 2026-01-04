@@ -60,6 +60,7 @@ class MonitorPacketArbiter(LiteXModule):
         header_count = Signal(4)
         payload_count = Signal(16)
         payload_length_dw = Signal(10)
+        payload_odd = Signal()
 
         # Packet length in bytes (latched for USB channel description)
         packet_length_bytes = Signal(32)
@@ -110,12 +111,14 @@ class MonitorPacketArbiter(LiteXModule):
                 NextValue(from_tx, 0),
                 NextValue(header_count, HEADER_WORDS_32),
                 NextValue(payload_length_dw, self.rx_header.data[:10]),
+                NextValue(payload_odd, self.rx_header.data[0]),
                 NextValue(packet_length_bytes, (HEADER_WORDS_32 + self.rx_header.data[:10]) << 2),
                 NextState("HEADER"),
             ).Elif(self.tx_header.valid,
                 NextValue(from_tx, 1),
                 NextValue(header_count, HEADER_WORDS_32),
                 NextValue(payload_length_dw, self.tx_header.data[:10]),
+                NextValue(payload_odd, self.tx_header.data[0]),
                 NextValue(packet_length_bytes, (HEADER_WORDS_32 + self.tx_header.data[:10]) << 2),
                 NextState("HEADER"),
             ),
@@ -165,7 +168,28 @@ class MonitorPacketArbiter(LiteXModule):
             If(payload_valid & self.source.ready,
                 NextValue(payload_count, payload_count - 1),
                 If(payload_count == 1,
-                    NextState("IDLE"),
+                    If(payload_odd,
+                        NextState("PAD"),
+                    ).Else(
+                        NextState("IDLE"),
+                    ),
                 ),
+            ),
+        )
+
+        # Discard the extra upper DWORD emitted by the 64->32 converter on odd payload sizes.
+        fsm.act("PAD",
+            self.source.valid.eq(0),
+            self.source.data.eq(0),
+            self.source.first.eq(0),
+            self.source.last.eq(0),
+
+            self.rx_header.ready.eq(0),
+            self.tx_header.ready.eq(0),
+            self.rx_payload.ready.eq(~from_tx),
+            self.tx_payload.ready.eq(from_tx),
+
+            If(payload_valid,
+                NextState("IDLE"),
             ),
         )

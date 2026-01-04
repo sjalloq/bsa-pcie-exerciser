@@ -48,6 +48,8 @@ REG_USB_MON_RX_CAPTURED = 0x088
 REG_USB_MON_RX_DROPPED  = 0x08C
 REG_USB_MON_TX_CAPTURED = 0x090
 REG_USB_MON_TX_DROPPED  = 0x094
+REG_USB_MON_RX_TRUNCATED = 0x098
+REG_USB_MON_TX_TRUNCATED = 0x09C
 
 
 class BSARegisters(LiteXModule):
@@ -160,6 +162,8 @@ class BSARegisters(LiteXModule):
         self.usb_mon_rx_dropped   = Signal(32)           # Input: RX packets dropped
         self.usb_mon_tx_captured  = Signal(32)           # Input: TX packets captured
         self.usb_mon_tx_dropped   = Signal(32)           # Input: TX packets dropped
+        self.usb_mon_rx_truncated = Signal(32)           # Input: RX packets truncated
+        self.usb_mon_tx_truncated = Signal(32)           # Input: TX packets truncated
 
         # =====================================================================
         # Wishbone Address Decoding
@@ -210,6 +214,8 @@ class BSARegisters(LiteXModule):
                 REG_USB_MON_RX_DROPPED:  read_data.eq(self.usb_mon_rx_dropped),
                 REG_USB_MON_TX_CAPTURED: read_data.eq(self.usb_mon_tx_captured),
                 REG_USB_MON_TX_DROPPED:  read_data.eq(self.usb_mon_tx_dropped),
+                REG_USB_MON_RX_TRUNCATED: read_data.eq(self.usb_mon_rx_truncated),
+                REG_USB_MON_TX_TRUNCATED: read_data.eq(self.usb_mon_tx_truncated),
                 "default":          read_data.eq(0),
             }),
         ]
@@ -270,6 +276,7 @@ class BSARegisters(LiteXModule):
 
         # DMACTL: [3:0]=trigger, [4]=dir, [5]=no_snoop, [6]=pasid_en,
         #         [7]=privileged, [8]=instruction, [9]=use_atc, [11:10]=addr_type
+        # (per ARM BSA Exerciser spec)
         self.comb += [
             self.dma_direction.eq(self.dmactl[4]),
             self.dma_no_snoop.eq(self.dmactl[5]),
@@ -281,15 +288,16 @@ class BSARegisters(LiteXModule):
             self.dma_bus_addr.eq(Cat(self.dma_bus_addr_lo, self.dma_bus_addr_hi)),
         ]
 
-        # DMA trigger: detect write with trigger field == 1
-        dma_trigger_prev = Signal(4)
-        self.sync += dma_trigger_prev.eq(self.dmactl[:4])
-        self.comb += self.dma_trigger.eq((self.dmactl[:4] == 1) & (dma_trigger_prev != 1) & ~self.dma_busy)
+        # DMA trigger: detect rising edge on trigger bit (bit 0) when not busy
+        # The trigger bit can be set along with other control bits (e.g., direction)
+        dma_trigger_prev = Signal()
+        self.sync += dma_trigger_prev.eq(self.dmactl[0])
+        self.comb += self.dma_trigger.eq(self.dmactl[0] & ~dma_trigger_prev & ~self.dma_busy)
 
-        # Auto-clear DMA trigger after started
+        # Auto-clear DMA trigger bit after started
         self.sync += [
             If(self.dma_trigger,
-                self.dmactl[:4].eq(0),
+                self.dmactl[0].eq(0),
             ),
         ]
 
@@ -339,7 +347,18 @@ class BSARegisters(LiteXModule):
             self.atsctl[6].eq(self.ats_in_flight),
             self.atsctl[7].eq(self.ats_success),
             self.atsctl[8].eq(self.ats_cacheable),
-            self.atsctl[9].eq(self.ats_invalidated),
+        ]
+
+        # Invalidated bit (9) is sticky: set on pulse, cleared by writing 1 to bit 9
+        self.sync += [
+            If(self.ats_invalidated,
+                # Set when invalidation occurs
+                self.atsctl[9].eq(1),
+            ).Elif(self.bus.cyc & self.bus.stb & self.bus.we &
+                   (reg_addr == REG_ATSCTL) & self.bus.dat_w[9],
+                # Clear when software writes 1 to bit 9 (write-1-to-clear)
+                self.atsctl[9].eq(0),
+            ),
         ]
 
         # ATS result registers update from ATS engine

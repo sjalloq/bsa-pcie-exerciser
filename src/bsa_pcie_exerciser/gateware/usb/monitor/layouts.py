@@ -60,7 +60,9 @@ DIR_TX = 1  # Outbound (device -> host)
 #     [7:6]   : at
 #     [8]     : pasid_valid (TX) / reserved (RX)
 #     [28:9]  : pasid (TX) / reserved (RX)
-#     [31:29] : status (completions)
+#     [29]    : privileged (TX requests) / status[0] (completions)
+#     [30]    : execute (TX requests) / status[1] (completions)
+#     [31]    : status[2] (completions) / reserved (TX requests)
 #     [47:32] : cmp_id (completions)
 #     [59:48] : byte_count (completions)
 #     [63:60] : reserved
@@ -165,7 +167,8 @@ def build_header_word3_rx(we, bar_hit, attr, at, status, cmp_id, byte_count):
     )
 
 
-def build_header_word3_tx(we, attr, at, pasid_valid, pasid, status, cmp_id, byte_count):
+def build_header_word3_tx(we, attr, at, pasid_valid, pasid, privileged, execute,
+                          status, cmp_id, byte_count):
     """
     Build header word 3 for TX (outbound) TLPs.
 
@@ -175,12 +178,17 @@ def build_header_word3_tx(we, attr, at, pasid_valid, pasid, status, cmp_id, byte
         at: Address type (2 bits)
         pasid_valid: PASID present (1 bit)
         pasid: PASID value (20 bits)
-        status: Completion status (3 bits)
+        privileged: Privileged Mode Requested - PMR (1 bit, for requests)
+        execute: Execute Requested - ER (1 bit, for requests)
+        status: Completion status (3 bits, for completions)
         cmp_id: Completer ID (16 bits)
         byte_count: Byte count (12 bits)
 
     Returns:
         64-bit header word 3
+
+    Note: For requests, bits [30:29] encode privileged/execute.
+          For completions, bits [31:29] encode status (priv/exec are 0).
     """
     return Cat(
         we,                     # [0]
@@ -189,7 +197,9 @@ def build_header_word3_tx(we, attr, at, pasid_valid, pasid, status, cmp_id, byte
         at[:2],                 # [7:6]
         pasid_valid,            # [8]
         pasid[:20],             # [28:9]
-        status[:3],             # [31:29]
+        privileged,             # [29] PMR for requests, status[0] for completions
+        execute,                # [30] ER for requests, status[1] for completions
+        status[2],              # [31] status[2] for completions
         cmp_id[:16],            # [47:32]
         byte_count[:12],        # [59:48]
         Constant(0, 4),         # [63:60] reserved

@@ -520,17 +520,17 @@ async def test_golden_payload_sizes(dut):
         assert pkt is not None, f"No packet for {size}-byte payload"
 
         # Verify payload
-        if pkt.payload:
-            captured = pkt.payload_bytes[:size]
-            match = captured == test_payload
-            if not match:
-                dut._log.error(f"Payload mismatch at {size} bytes:")
-                dut._log.error(f"  Expected: {test_payload.hex()}")
-                dut._log.error(f"  Got:      {captured.hex()}")
-            assert match, f"Payload mismatch for {size}-byte write"
-            dut._log.info(f"✓ {size}-byte payload verified")
-        else:
-            dut._log.warning(f"No payload captured for {size}-byte write")
+        assert pkt.payload is not None and len(pkt.payload) > 0, \
+            f"Expected payload for {size}-byte write"
+
+        captured = pkt.payload_bytes[:size]
+        match = captured == test_payload
+        if not match:
+            dut._log.error(f"Payload mismatch at {size} bytes:")
+            dut._log.error(f"  Expected: {test_payload.hex()}")
+            dut._log.error(f"  Got:      {captured.hex()}")
+        assert match, f"Payload mismatch for {size}-byte write"
+        dut._log.info(f"✓ {size}-byte payload verified")
 
     dut._log.info(f"✓ All payload sizes verified")
 

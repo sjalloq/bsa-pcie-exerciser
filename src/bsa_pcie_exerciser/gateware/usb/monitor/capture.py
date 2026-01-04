@@ -83,9 +83,11 @@ class TLPCaptureEngine(LiteXModule):
         # RX only: BAR hit
         self.tap_req_bar_hit = Signal(3)
 
-        # TX only: PASID
+        # TX only: PASID and privilege/execute bits
         self.tap_req_pasid_valid = Signal()
         self.tap_req_pasid   = Signal(20)
+        self.tap_req_privileged = Signal()  # PMR (Privileged Mode Requested)
+        self.tap_req_execute = Signal()     # ER (Execute Requested)
 
         # =====================================================================
         # Tap Interface - Completion Source/Sink
@@ -142,6 +144,8 @@ class TLPCaptureEngine(LiteXModule):
         tap_bar_hit = Signal(3)
         tap_pasid_valid = Signal()
         tap_pasid = Signal(20)
+        tap_privileged = Signal()
+        tap_execute = Signal()
         tap_status = Signal(3)
         tap_cmp_id = Signal(16)
         tap_byte_count = Signal(12)
@@ -178,6 +182,8 @@ class TLPCaptureEngine(LiteXModule):
                 tap_bar_hit.eq(self.tap_req_bar_hit),
                 tap_pasid_valid.eq(self.tap_req_pasid_valid),
                 tap_pasid.eq(self.tap_req_pasid),
+                tap_privileged.eq(self.tap_req_privileged),
+                tap_execute.eq(self.tap_req_execute),
                 tap_status.eq(0),
                 tap_cmp_id.eq(0),
                 tap_byte_count.eq(0),
@@ -197,6 +203,8 @@ class TLPCaptureEngine(LiteXModule):
                 tap_bar_hit.eq(0),
                 tap_pasid_valid.eq(0),
                 tap_pasid.eq(0),
+                tap_privileged.eq(0),
+                tap_execute.eq(0),
                 tap_status.eq(self.tap_cpl_status),
                 tap_cmp_id.eq(self.tap_cpl_cmp_id),
                 tap_byte_count.eq(self.tap_cpl_byte_count),
@@ -240,9 +248,12 @@ class TLPCaptureEngine(LiteXModule):
         latched_at = Signal(2)
         latched_pasid_valid = Signal()
         latched_pasid = Signal(20)
+        latched_privileged = Signal()
+        latched_execute = Signal()
         latched_status = Signal(3)
         latched_cmp_id = Signal(16)
         latched_byte_count = Signal(12)
+        latched_has_payload = Signal()
 
         # =====================================================================
         # Packet State
@@ -303,21 +314,14 @@ class TLPCaptureEngine(LiteXModule):
         # Header Construction (uses latched values + actual payload count)
         # =====================================================================
 
-        # True beat count for header (includes current beat's success)
-        # - On first beat: count is 1 (success) or 0 (fail)
-        # - On other beats: registered count + current beat
-        true_beats_count = Signal(10)
-        self.comb += [
-            If(first_beat,
-                true_beats_count.eq(payload_write_success),
-            ).Else(
-                true_beats_count.eq(payload_beats_written + payload_write_success),
+        # Capture the TLP length field for reporting.
+        # This reports the original payload length in DWORDs from the TLP header.
+        latched_len = Signal(10)
+        self.sync += [
+            If(first_beat & self.header_sink.ready,
+                latched_len.eq(tap_len),
             ),
         ]
-
-        # Actual payload length in 32-bit DWORDs = beats * 2
-        actual_payload_dw = Signal(10)
-        self.comb += actual_payload_dw.eq(true_beats_count << 1)
 
         # For single-beat packets (first=last=1), the latched values haven't been
         # updated yet (sync takes effect next cycle). Use tap signals directly.
@@ -339,6 +343,8 @@ class TLPCaptureEngine(LiteXModule):
         use_at = Signal(2)
         use_pasid_valid = Signal()
         use_pasid = Signal(20)
+        use_privileged = Signal()
+        use_execute = Signal()
         use_status = Signal(3)
         use_cmp_id = Signal(16)
         use_byte_count = Signal(12)
@@ -358,6 +364,8 @@ class TLPCaptureEngine(LiteXModule):
                 use_at.eq(tap_at),
                 use_pasid_valid.eq(tap_pasid_valid),
                 use_pasid.eq(tap_pasid),
+                use_privileged.eq(tap_privileged),
+                use_execute.eq(tap_execute),
                 use_status.eq(tap_status),
                 use_cmp_id.eq(tap_cmp_id),
                 use_byte_count.eq(tap_byte_count),
@@ -375,6 +383,8 @@ class TLPCaptureEngine(LiteXModule):
                 use_at.eq(latched_at),
                 use_pasid_valid.eq(latched_pasid_valid),
                 use_pasid.eq(latched_pasid),
+                use_privileged.eq(latched_privileged),
+                use_execute.eq(latched_execute),
                 use_status.eq(latched_status),
                 use_cmp_id.eq(latched_cmp_id),
                 use_byte_count.eq(latched_byte_count),
@@ -389,7 +399,11 @@ class TLPCaptureEngine(LiteXModule):
 
         self.comb += [
             header_word0.eq(build_header_word0(
-                actual_payload_dw, use_tlp_type, direction,
+                Mux(single_beat,
+                    Mux(has_payload, tap_len, 0),
+                    Mux(latched_has_payload, latched_len, 0),
+                ),
+                use_tlp_type, direction,
                 use_timestamp[:32], final_truncated
             )),
             header_word1.eq(build_header_word1(
@@ -407,7 +421,7 @@ class TLPCaptureEngine(LiteXModule):
         else:
             self.comb += header_word3.eq(build_header_word3_tx(
                 use_we, use_attr, use_at, use_pasid_valid, use_pasid,
-                use_status, use_cmp_id, use_byte_count
+                use_privileged, use_execute, use_status, use_cmp_id, use_byte_count
             ))
 
         # Full 256-bit header
@@ -461,9 +475,12 @@ class TLPCaptureEngine(LiteXModule):
                     latched_at.eq(tap_at),
                     latched_pasid_valid.eq(tap_pasid_valid),
                     latched_pasid.eq(tap_pasid),
+                    latched_privileged.eq(tap_privileged),
+                    latched_execute.eq(tap_execute),
                     latched_status.eq(tap_status),
                     latched_cmp_id.eq(tap_cmp_id),
                     latched_byte_count.eq(tap_byte_count),
+                    latched_has_payload.eq(has_payload),
                 ).Else(
                     # Header FIFO full - drop entire packet
                     # For multi-beat: set dropping flag (count on last beat)

@@ -200,6 +200,10 @@ class SquirrelSoC(BSAExerciserSoC):
             self.comb += self.usb_monitor.tx_req_pasid_valid.eq(req_sink.pasid_en)
         if hasattr(req_sink, 'pasid_val'):
             self.comb += self.usb_monitor.tx_req_pasid.eq(req_sink.pasid_val)
+        if hasattr(req_sink, 'privileged'):
+            self.comb += self.usb_monitor.tx_req_privileged.eq(req_sink.privileged)
+        if hasattr(req_sink, 'execute'):
+            self.comb += self.usb_monitor.tx_req_execute.eq(req_sink.execute)
 
         # TX Completion tap
         self.comb += [
@@ -239,6 +243,8 @@ class SquirrelSoC(BSAExerciserSoC):
             self.bsa_regs.usb_mon_rx_dropped.eq(self.usb_monitor.rx_dropped),
             self.bsa_regs.usb_mon_tx_captured.eq(self.usb_monitor.tx_captured),
             self.bsa_regs.usb_mon_tx_dropped.eq(self.usb_monitor.tx_dropped),
+            self.bsa_regs.usb_mon_rx_truncated.eq(self.usb_monitor.rx_truncated),
+            self.bsa_regs.usb_mon_tx_truncated.eq(self.usb_monitor.tx_truncated),
         ]
 
         # Connect to USB channel 1

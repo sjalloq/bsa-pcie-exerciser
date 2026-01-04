@@ -1,6 +1,6 @@
 # BSA PCIe Exerciser - Implementation Status
 
-**Last Updated:** December 2025
+**Last Updated:** January 2026
 
 This document tracks the implementation status of the ARM BSA PCIe Exerciser.
 
@@ -17,9 +17,11 @@ This document tracks the implementation status of the ARM BSA PCIe Exerciser.
 | DMA Engine | ✅ Complete | Register-triggered, 16KB buffer in BAR1 |
 | Transaction Monitor | ✅ Complete | TXN_TRACE FIFO, 32 entry capture buffer |
 | Legacy Interrupt | ✅ Complete | INTx assertion via INTXCTL |
-| ATS Engine | ❌ Not Started | Translation requests |
-| PASID Support | ❌ Not Started | TLP prefix generation |
-| RID Override | ❌ Not Started | Requester ID spoofing |
+| ATS Engine | ✅ Complete | Translation requests, ATC, invalidation |
+| PASID Support | ✅ Complete | TLP prefix generation |
+| RID Override | ✅ Complete | Requester ID override |
+| USB Monitor | ✅ Complete | TLP streaming via FT601 |
+| Squirrel Platform | ✅ Complete | CaptainDMA/Squirrel board support |
 
 ---
 
@@ -133,30 +135,64 @@ See `docs/REGISTER_MAP.md` for detailed register definitions.
 - Pulses `cfg_interrupt` with desired `cfg_interrupt_assert` value
 - Waits for `cfg_interrupt_rdy` acknowledgement
 
+### ATS Engine
+
+**Location:** `src/bsa_pcie_exerciser/gateware/ats/`
+
+- `ATSEngine` - Generates ATS Translation Request TLPs
+- `ATSCache` - Address Translation Cache with PASID support
+- `ATSInvalidationHandler` - Processes invalidation requests
+
+**Features:**
+- Translation request generation via ATSCTL register
+- ATC with configurable entries and PASID matching
+- Invalidation handling (global and page-selective)
+- Results stored in ATS_ADDR/ATS_RANGE/ATS_PERM registers
+
+### PASID Support
+
+**Location:** `src/bsa_pcie_exerciser/gateware/pasid/`
+
+- `PASIDPrefixInjector` - Injects PASID TLP prefix on outbound requests
+- Controlled via DMACTL register bits (pasid_en, privileged, instruction)
+- PASID value from PASID_VAL register
+
+### Requester ID Override
+
+**Location:** `src/bsa_pcie_exerciser/gateware/core/bsa_registers.py`
+
+- RID_CTL register for custom Requester ID
+- When valid=1, outbound TLPs use override value
+
+### USB Monitor Subsystem
+
+**Location:** `src/bsa_pcie_exerciser/gateware/usb/monitor/`
+
+- `TLPCaptureEngine` - Captures RX/TX TLPs with timestamps
+- `MonitorAsyncFIFO` - CDC between PCIe and USB clock domains
+- `MonitorPacketArbiter` - Round-robin packet-atomic arbitration
+- `USBMonitorSubsystem` - Top-level integration
+
+**Features:**
+- Full TLP capture (RX and TX directions)
+- Streaming via FT601 USB 3.0 interface
+- Etherbone CSR access via USB channel 0
+- Monitor data via USB channel 1
+- Drop counting and statistics
+
 ---
 
 ## Remaining Work
 
-### Phase 5: Advanced Features (Lower Priority)
-
-**ATS Engine:**
-- [ ] Generate ATS Translation Request TLPs
-- [ ] Handle Translation Completions
-- [ ] Store results in ATS_ADDR/ATS_RANGE/ATS_PERM registers
-- [ ] ATC (Address Translation Cache)
-
-**PASID Support:**
-- [ ] Generate PASID TLP Prefix when enabled
-- [ ] Use PASID_VAL register value
-- [ ] Privileged/Execute mode bits
-
-**RID Override:**
-- [ ] Use custom Requester ID when RID_CTL.valid=1
-- [ ] Modify outbound TLP headers
+### Future Enhancements (Lower Priority)
 
 **Error Injection:**
 - [ ] DVSEC for error control
 - [ ] Poison mode for completion errors
+
+**Host Software Tools:**
+- [ ] Wireshark dissector for USB capture
+- [ ] Extended analysis tooling
 
 ---
 
@@ -174,24 +210,38 @@ Repository: https://github.com/sjalloq/litepcie/tree/feature/tlp-attributes
 
 ## Test Infrastructure
 
-### MSI-X Tests
+### Test Directories
 
-**Location:** `tests/msix/`
+| Directory | Purpose | Tests |
+|-----------|---------|-------|
+| `tests/integration/` | PCIe path integration | ~45 tests |
+| `tests/usb/` | USB testbench (Squirrel) | ~40 tests |
+| `tests/dma/` | DMA unit tests | 9 tests |
+| `tests/msix/` | MSI-X unit tests | 15 tests |
 
-Cocotb testbench with 15 tests covering:
-- Table read/write operations
-- Software-triggered MSI-X generation
-- Masked vector handling
-- PBA read-only enforcement
-- Backpressure handling
-- Multi-vector operations
+### USB Testbench (`tests/usb/`)
+
+Comprehensive testbench for USB subsystem:
+- `test_etherbone.py` - CSR access via USB
+- `test_monitor_rx.py` - RX TLP capture
+- `test_monitor_tx.py` - TX TLP capture
+- `test_golden_reference.py` - Field verification
+- `test_stress.py` - High-volume stress tests
+- `test_corner_cases.py` - Edge cases
+- `test_ats_invalidation.py` - ATS invalidation
+- `test_pasid_switching.py` - PASID context switching
+- `test_requester_id.py` - RID override
+- `test_dma_ordering.py` - Multi-DMA ordering
 
 ### Running Tests
 
 ```bash
 source sourceme
-cd tests/msix
-make
+cd tests/usb
+make sim
+
+# Or specific tests:
+make sim COCOTB_TEST_FILTER=test_etherbone
 ```
 
 ---

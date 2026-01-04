@@ -301,17 +301,14 @@ async def test_bar0_register_partial_write(dut):
     readback = await read_dword(bfm, BAR0_HIT, REG_PASID_VAL, tag=4)
     expected = 0x000AAA55 & 0xFFFFF
 
-    if (readback & 0xFFFFF) == expected:
-        dut._log.info(f"PASS: BAR0 register partial write: 0x{readback:08X}")
-    else:
-        dut._log.warning(
-            f"BAR0 register partial write result:\n"
-            f"  Initial:  0x{initial_value:08X}\n"
-            f"  Written:  0x{partial_value:08X} (first_be=0x1)\n"
-            f"  Expected: 0x{expected:08X}\n"
-            f"  Got:      0x{readback:08X}\n"
-            f"  Note: Register may not support partial byte enables"
-        )
+    assert (readback & 0xFFFFF) == expected, \
+        f"BAR0 register partial write failed:\n" \
+        f"  Initial:  0x{initial_value:08X}\n" \
+        f"  Written:  0x{partial_value:08X} (first_be=0x1)\n" \
+        f"  Expected: 0x{expected:08X}\n" \
+        f"  Got:      0x{readback:08X}"
+
+    dut._log.info(f"PASS: BAR0 register partial write: 0x{readback:08X}")
 
 
 @cocotb.test()

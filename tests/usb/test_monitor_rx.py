@@ -174,12 +174,14 @@ async def test_rx_monitor_mem_write(dut):
     assert pkt.we == True, "Expected we=1 for write"
     assert pkt.address == address, f"Address mismatch"
 
-    # Verify payload
-    if pkt.payload:
-        captured_bytes = pkt.payload_bytes[:len(write_data)]
-        dut._log.info(f"Captured MWr: payload={captured_bytes.hex()}")
+    # Verify payload presence and content
+    assert pkt.payload is not None and len(pkt.payload) > 0, \
+        "MWr TLP should have payload data"
+    captured_bytes = pkt.payload_bytes[:len(write_data)]
+    assert captured_bytes == write_data, \
+        f"Payload mismatch: got {captured_bytes.hex()}, expected {write_data.hex()}"
 
-    dut._log.info(f"Captured MWr: addr=0x{pkt.address:X}, tag={pkt.tag}")
+    dut._log.info(f"Captured MWr: addr=0x{pkt.address:X}, tag={pkt.tag}, payload={captured_bytes.hex()}")
 
 
 @cocotb.test()
@@ -296,16 +298,17 @@ async def test_rx_monitor_backpressure(dut):
     # Clear stats
     await clear_stats(usb_bfm)
 
-    # Inject multiple TLPs that should be dropped
-    for i in range(5):
-        beats = TLPBuilder.memory_read_32(
+    # Inject many TLPs with payload to guarantee FIFO overflow
+    for i in range(50):
+        # Use MWr with 16 bytes payload to fill FIFO faster
+        beats = TLPBuilder.memory_write_32(
             address=0x100 + i * 4,
-            length_dw=1,
+            data_bytes=bytes([i & 0xFF] * 16),
             requester_id=0x0100,
-            tag=i,
+            tag=i & 0xFF,
         )
         await pcie_bfm.inject_tlp(beats, bar_hit=0b000001)
-        await ClockCycles(dut.sys_clk, 20)
+        await ClockCycles(dut.sys_clk, 5)
 
     await ClockCycles(dut.sys_clk, 200)
 
@@ -313,11 +316,11 @@ async def test_rx_monitor_backpressure(dut):
     usb_bfm.set_backpressure(False)
     usb_bfm.set_capture_ready(True)
 
-    # Check dropped counter
+    # Check dropped counter - with 50 large TLPs under backpressure, some must drop
     dropped = await usb_bfm.send_etherbone_read(REG_USB_MON_RX_DROPPED)
 
     dut._log.info(f"Dropped {dropped} packets under backpressure")
-    # Note: The actual drop count depends on FIFO depth and timing
+    assert dropped > 0, "Expected packets to be dropped under backpressure"
 
 
 @cocotb.test()
@@ -347,10 +350,10 @@ async def test_rx_monitor_multiple_tlps(dut):
     captured = []
     for i in range(num_tlps):
         packet_data = await usb_bfm.receive_monitor_packet(timeout_cycles=500)
-        if packet_data:
-            pkt = parse_monitor_packet(packet_data)
-            captured.append(pkt)
-            dut._log.info(f"Captured TLP {i}: addr=0x{pkt.address:X}, tag={pkt.tag}")
+        assert packet_data is not None, f"Expected to capture TLP {i}/{num_tlps}"
+        pkt = parse_monitor_packet(packet_data)
+        captured.append(pkt)
+        dut._log.info(f"Captured TLP {i}: addr=0x{pkt.address:X}, tag={pkt.tag}")
 
     dut._log.info(f"Captured {len(captured)}/{num_tlps} TLPs")
 
@@ -390,4 +393,6 @@ async def test_rx_monitor_captured_count(dut):
     final_count = await usb_bfm.send_etherbone_read(REG_USB_MON_RX_CAPTURED)
     dut._log.info(f"Final captured count: {final_count}")
 
-    # Note: Captured count includes header and payload, exact value depends on implementation
+    # Captured count should have increased
+    assert final_count > initial_count, \
+        f"Captured count should increase: initial={initial_count}, final={final_count}"

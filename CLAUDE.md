@@ -4,7 +4,7 @@
 
 Arm BSA/SBSA PCIe Exerciser implementation using the LiteX/LitePCIe framework. This is an FPGA-based PCIe endpoint for compliance testing of SMMU/IOMMU, cache coherency, address translation, and interrupt handling.
 
-Target hardware: 
+Target hardware:
 - SPEC-A7 board (Xilinx Artix-7 xc7a50t)
 - CaptainDMA 4.1th
 - LambdaConcept Screamer PCIe Squirrel
@@ -21,7 +21,7 @@ The backbone of this project is the LiteX framework and the existing support for
 
 ## Arm BSA
 
-The Arm Base System Architecture defines a set of hardware capabilities as seen by software running on Arm 64-bit apps processors.  This project is interested in the BSA PCIe Exerciser, a PCIe endpoint designed to aid validation of PCIe subsystems.  
+The Arm Base System Architecture defines a set of hardware capabilities as seen by software running on Arm 64-bit apps processors.  This project is interested in the BSA PCIe Exerciser, a PCIe endpoint designed to aid validation of PCIe subsystems.
 
 - **Main GitHub Page**: https://github.com/ARM-software/sysarch-acs
 - **PCIe Exerciser**: https://github.com/ARM-software/sysarch-acs/blob/main/docs/pcie/Exerciser.md
@@ -42,6 +42,22 @@ bsa-pcie-exerciser --build
 
 # Load via JTAG
 bsa-pcie-exerciser --load
+```
+
+## Running Testbenches
+
+```bash
+# From project root:
+source .venv/bin/activate && module load verilator && cd tests/<bench> && make sim
+
+# With clean build:
+source .venv/bin/activate && module load verilator && cd tests/<bench> && make clean && make sim
+
+# Run specific test(s):
+make sim COCOTB_TEST_FILTER=<testname_string>
+
+# Example:
+cd tests/usb && make sim COCOTB_TEST_FILTER=test_tx_monitor_msix
 ```
 
 ## Architecture
@@ -82,3 +98,26 @@ SPEC-A7 board definition with pin mappings for PCIe, clocks, LEDs, SFPs, etc.
 3. MSI-X with 2048 vectors
 4. BSA DMA engine with TLP attribute control
 5. PASID/ATS support
+
+## Test Writing Requirements - MANDATORY
+
+1. **Every test MUST contain at least one `assert` or `raise AssertionError`**
+   - Tests without assertions are REJECTED
+   - If a feature isn't implemented, use `@cocotb.test(skip=True)` NOT warnings
+
+2. **NEVER use `dut._log.warning()` for test failures**
+   - Warnings are for informational output only
+   - Failed expectations MUST use `assert` or `raise`
+
+3. **NEVER return early from a test on failure**
+   - Bad: `if not success: return`
+   - Good: `assert success, "Precondition failed: X"`
+
+4. **NEVER log "PASSED" manually**
+   - cocotb marks tests as passed/failed automatically
+   - Manual "PASSED" logs mask actual failures
+
+5. **If unsure whether RTL is implemented:**
+   - Add a clear assertion that will fail
+   - Mark test with `skip=True` until RTL is ready
+   - NEVER make test silently accept failure

@@ -279,12 +279,8 @@ async def test_etherbone_concurrent_with_pcie(dut):
     # Wait for and capture completion
     cpl_beats = await pcie_bfm.capture_tlp(timeout_cycles=500)
 
-    if cpl_beats:
-        # Parse completion data
-        # For now just verify we got a completion
-        dut._log.info(f"Got PCIe completion with {len(cpl_beats)} beats")
-    else:
-        dut._log.warning("No PCIe completion received (may be expected if completion path not fully wired)")
+    assert cpl_beats is not None, "Expected PCIe completion for memory read"
+    dut._log.info(f"Got PCIe completion with {len(cpl_beats)} beats")
 
     # Read via Etherbone to verify value
     readback = await usb_bfm.send_etherbone_read(REG_DMA_OFFSET)

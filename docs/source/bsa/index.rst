@@ -18,3 +18,4 @@ translation, and interrupt handling.
    interrupts
    ats
    registers
+   testcases

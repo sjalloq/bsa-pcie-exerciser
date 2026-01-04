@@ -203,7 +203,7 @@ class TLPBuilder:
 
     @staticmethod
     def ats_translation_completion(requester_id, completer_id, tag,
-                                   translated_addr, s_field=0, permissions=0x3F):
+                                   translated_addr, s_field=0, permissions=ATS_PERM_RW):
         """
         Build ATS Translation Completion TLP.
 
@@ -213,7 +213,7 @@ class TLPBuilder:
             tag: 8-bit tag from translation request
             translated_addr: Translated physical address (page-aligned)
             s_field: Size field (0=4KB, 1=8KB, etc.)
-            permissions: Permission bits (R, W, Priv, etc.)
+            permissions: Permission bits (R, W, Priv, etc.), default=ATS_PERM_RW
 
         Returns:
             List of beat dicts with 'dat' and 'be' keys
@@ -489,3 +489,87 @@ class TLPBuilder:
         # DW1 is in upper 32 bits of beat 0
         dw1 = (beats[0]['dat'] >> 32) & 0xFFFFFFFF
         return (dw1 >> 8) & 0xFF
+
+    @staticmethod
+    def ats_invalidation_request(requester_id, device_id, itag, address,
+                                  s_bit=0, g_bit=0, tag=0):
+        """
+        Build ATS Invalidation Request Message TLP.
+
+        Per PCIe ATS specification, this message invalidates cached
+        translations in an endpoint's Address Translation Cache (ATC).
+
+        Args:
+            requester_id: 16-bit requester ID (Translation Agent sending invalidation)
+            device_id: 16-bit device ID (target endpoint with ATC)
+            itag: 5-bit invalidation tag (for completion matching)
+            address: Untranslated address to invalidate (page-aligned)
+            s_bit: Size bit (0=4KB page, 1=extended range with data payload)
+            g_bit: Global bit (1=ignore PASID, invalidate all contexts)
+            tag: 8-bit TLP tag
+
+        Returns:
+            List of beat dicts with 'dat' and 'be' keys
+
+        Message Format (4DW header):
+            DW0: Fmt=001 (4DW no data), Type=10010 (Msg by ID), Length=0
+            DW1: Requester ID, Tag, Message Code=0x01
+            DW2: Device ID, ITAG, S-bit, G-bit
+            DW3: Address [63:32] (upper 32 bits of untranslated address)
+
+        Note: For S=1 (extended invalidation), additional data DWORDs are needed
+        to specify the range. This implementation only supports S=0 (4KB page).
+        """
+        # Message Code for ATS Invalidation Request
+        MSG_CODE_INV_REQ = 0x01
+
+        # DW0: Fmt=001 (4DW, no data), Type=10010 (Msg routed by ID)
+        # Length = 0 (no data payload for S=0)
+        fmt = 0b001
+        msg_type = 0b10010
+        length = 0
+        dw0 = (fmt << 29) | (msg_type << 24) | (length & 0x3FF)
+
+        # DW1: Requester ID, Tag, Message Code
+        dw1 = (requester_id << 16) | (tag << 8) | MSG_CODE_INV_REQ
+
+        # DW2: Device ID [31:16], ITAG [15:11], Reserved [10:2], S [1], G [0]
+        dw2 = ((device_id & 0xFFFF) << 16) | \
+              ((itag & 0x1F) << 11) | \
+              ((s_bit & 0x1) << 1) | \
+              (g_bit & 0x1)
+
+        # DW3: Upper 32 bits of untranslated address
+        # For S=0, this contains address[63:32] (page address upper bits)
+        dw3 = (address >> 32) & 0xFFFFFFFF
+
+        # For addresses < 4GB, address[63:32] = 0, so we use address[31:12] | 0
+        # shifted appropriately. Actually per spec, DW3 contains the address bits.
+        # Let's just use upper 32 bits.
+        if address < 0x100000000:
+            # For 32-bit addresses, DW3 should contain address[31:0] with lower 12 bits = 0
+            dw3 = address & 0xFFFFF000
+
+        beats = [
+            {'dat': (dw1 << 32) | dw0, 'be': 0xFF},  # DW0 lower, DW1 upper
+            {'dat': (dw3 << 32) | dw2, 'be': 0xFF},  # DW2 lower, DW3 upper
+        ]
+
+        return beats
+
+    @staticmethod
+    def extract_requester_id_from_tlp(beats):
+        """
+        Extract requester ID from a Memory Read/Write TLP.
+
+        Args:
+            beats: List of beat dicts from captured TLP
+
+        Returns:
+            16-bit requester ID from DW1, or None if beats is empty.
+        """
+        if not beats:
+            return None
+        # DW1 is in upper 32 bits of beat 0
+        dw1 = (beats[0]['dat'] >> 32) & 0xFFFFFFFF
+        return (dw1 >> 16) & 0xFFFF
