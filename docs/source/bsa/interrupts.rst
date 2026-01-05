@@ -12,7 +12,7 @@ The exerciser implements full MSI-X capability:
 Vector Count
 ~~~~~~~~~~~~
 
-* Up to 2048 MSI-X vectors
+* 16 MSI-X vectors implemented
 * Each vector independently configurable
 * Per-vector masking support
 
@@ -25,14 +25,15 @@ Each MSI-X table entry (16 bytes) contains:
 * **Message Data** (32-bit): Data value written to trigger interrupt
 * **Vector Control** (32-bit): Bit 0 is the mask bit
 
-The table is accessible via BAR2 (32KB for 2048 vectors).
+The table is accessible via BAR2. The BAR window is 32KB, but only the
+first 16 entries (256 bytes) are implemented; the remaining space is reserved.
 
 Pending Bit Array (PBA)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-* One bit per vector indicating pending status
+* One bit per vector indicating pending status (16 bits used)
 * Read-only from host perspective
-* Accessible via BAR5
+* Accessible via BAR5 (window is 4KB; only lower bits are valid)
 
 Software Trigger
 ~~~~~~~~~~~~~~~~

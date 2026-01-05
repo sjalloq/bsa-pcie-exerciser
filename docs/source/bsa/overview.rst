@@ -47,7 +47,7 @@ Interrupt Testing
 
 The exerciser supports multiple interrupt mechanisms:
 
-* **MSI-X**: Up to 2048 vectors with full table/PBA implementation
+* **MSI-X**: 16 vectors with table/PBA implementation
 * **Legacy INTx**: Level-triggered interrupt assertion/deassertion
 
 Test software can trigger arbitrary interrupt vectors and verify delivery.

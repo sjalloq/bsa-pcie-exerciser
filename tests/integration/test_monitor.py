@@ -40,17 +40,14 @@ REG_TXN_CTRL  = 0x44   # Transaction control:
 
 
 # =============================================================================
-# FIFO Word Format (5 words per transaction)
+# FIFO Word Format (5 words per transaction, ACS TXN_TRACE encoding)
 # =============================================================================
-# Word 0 (Attributes):
-#   [0]     : we (1=write, 0=read)
-#   [3:1]   : bar_hit[2:0]
-#   [13:4]  : len[9:0] (DWORD count)
-#   [17:14] : first_be[3:0]
-#   [21:18] : last_be[3:0]
-#   [23:22] : attr[1:0] (relaxed ordering, no snoop)
-#   [25:24] : at[1:0] (address type)
-#   [31:26] : reserved
+# Word 0 (TX_ATTRIBUTES):
+#   [0]     : type (CFG only: 0=Type0, 1=Type1)
+#   [1]     : R/W (1=read, 0=write)
+#   [2]     : CFG/MEM (1=CFG, 0=MEM)
+#   [15:3]  : reserved
+#   [31:16] : byte size one-hot (bit = log2(bytes))
 #
 # Word 1: ADDRESS[31:0]
 # Word 2: ADDRESS[63:32]
@@ -138,14 +135,27 @@ async def read_fifo_transaction(bfm):
 
     # Parse word 0 (attributes)
     w0 = words[0]
+    size_onehot = (w0 >> 16) & 0xFFFF
+
+    size_bytes = 0
+    if size_onehot == (1 << 0):
+        size_bytes = 1
+    elif size_onehot == (1 << 1):
+        size_bytes = 2
+    elif size_onehot == (1 << 2):
+        size_bytes = 4
+    elif size_onehot == (1 << 3):
+        size_bytes = 8
+
+    is_read = (w0 >> 1) & 0x1
+    is_cfg = (w0 >> 2) & 0x1
     txn = {
-        'we': (w0 >> 0) & 0x1,
-        'bar_hit': (w0 >> 1) & 0x7,
-        'length': (w0 >> 4) & 0x3FF,
-        'first_be': (w0 >> 14) & 0xF,
-        'last_be': (w0 >> 18) & 0xF,
-        'attr': (w0 >> 22) & 0x3,
-        'at': (w0 >> 24) & 0x3,
+        'type': (w0 >> 0) & 0x1,
+        'is_read': is_read,
+        'is_cfg': is_cfg,
+        'size_onehot': size_onehot,
+        'size_bytes': size_bytes,
+        'we': 0 if is_read else 1,
         'addr_lo': words[1],
         'addr_hi': words[2],
         'data_lo': words[3],
@@ -197,10 +207,14 @@ async def test_monitor_enable_capture(dut):
     if txn is None:
         raise AssertionError("No transaction captured when monitor enabled")
 
-    dut._log.info(f"Captured: we={txn['we']}, bar_hit={txn['bar_hit']}, addr=0x{txn['address']:08X}")
+    dut._log.info(
+        f"Captured: read={txn['is_read']}, cfg={txn['is_cfg']}, "
+        f"size={txn['size_bytes']}B, addr=0x{txn['address']:08X}"
+    )
 
-    assert txn['we'] == 1, "Expected write transaction (we=1)"
-    assert txn['bar_hit'] == 0b010, f"Expected BAR1 hit, got {txn['bar_hit']:03b}"
+    assert txn['we'] == 1, "Expected write transaction"
+    assert txn['is_cfg'] == 0, "Expected memory transaction"
+    assert txn['size_bytes'] == 4, f"Expected 4-byte write, got {txn['size_bytes']}B"
     assert txn['address'] == 0x100, f"Expected address 0x100, got 0x{txn['address']:08X}"
     assert txn['data_lo'] == 0x44332211, f"Expected data 0x44332211, got 0x{txn['data_lo']:08X}"
 
@@ -243,10 +257,10 @@ async def test_monitor_captures_write(dut):
 
     dut._log.info(f"Captured write: addr=0x{txn['address']:08X}, data=0x{txn['data_lo']:08X}")
 
-    assert txn['we'] == 1, "Expected write (we=1)"
+    assert txn['we'] == 1, "Expected write"
+    assert txn['is_cfg'] == 0, "Expected memory transaction"
+    assert txn['size_bytes'] == 4, f"Expected 4-byte write, got {txn['size_bytes']}B"
     assert txn['address'] == test_addr, f"Address mismatch: got 0x{txn['address']:08X}"
-    assert txn['length'] == 1, f"Length mismatch: got {txn['length']}"
-    assert txn['first_be'] == 0xF, f"first_be mismatch: got 0x{txn['first_be']:X}"
     assert txn['data_lo'] == test_data, f"Data mismatch: got 0x{txn['data_lo']:08X}, expected 0x{test_data:08X}"
 
     dut._log.info("test_monitor_captures_write PASSED")
@@ -288,11 +302,14 @@ async def test_monitor_captures_read(dut):
     if txn is None:
         raise AssertionError("No transaction captured")
 
-    dut._log.info(f"Captured read: addr=0x{txn['address']:08X}, len={txn['length']}, we={txn['we']}")
+    dut._log.info(
+        f"Captured read: addr=0x{txn['address']:08X}, size={txn['size_bytes']}B, read={txn['is_read']}"
+    )
 
-    assert txn['we'] == 0, "Expected read (we=0)"
+    assert txn['we'] == 0, "Expected read"
+    assert txn['is_cfg'] == 0, "Expected memory transaction"
     assert txn['address'] == test_addr, f"Address mismatch: got 0x{txn['address']:08X}"
-    assert txn['length'] == 2, f"Length mismatch: got {txn['length']}, expected 2"
+    assert txn['size_bytes'] == 8, f"Expected 8-byte read, got {txn['size_bytes']}B"
 
     dut._log.info("test_monitor_captures_read PASSED")
 
@@ -300,11 +317,7 @@ async def test_monitor_captures_read(dut):
 @cocotb.test(timeout_time=100, timeout_unit="us")
 async def test_monitor_extracts_attributes(dut):
     """
-    Verify monitor correctly extracts TLP attributes (attr, AT fields).
-
-    Tests with non-zero values to ensure bits are properly captured.
-    attr: [1]=Relaxed Ordering, [0]=No Snoop
-    at: Address Type (0=untranslated, 1=translation request, 2=translated)
+    Verify monitor captures transactions even when attr/AT are non-zero.
     """
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
 
@@ -334,10 +347,12 @@ async def test_monitor_extracts_attributes(dut):
     if txn is None:
         raise AssertionError("No transaction captured")
 
-    dut._log.info(f"Captured: attr=0b{txn['attr']:02b}, at=0b{txn['at']:02b}")
-
-    assert txn['attr'] == test_attr, f"Expected attr=0b{test_attr:02b}, got 0b{txn['attr']:02b}"
-    assert txn['at'] == test_at, f"Expected at=0b{test_at:02b}, got 0b{txn['at']:02b}"
+    dut._log.info(
+        f"Captured: read={txn['is_read']}, cfg={txn['is_cfg']}, size={txn['size_bytes']}B"
+    )
+    assert txn['we'] == 1, "Expected write"
+    assert txn['is_cfg'] == 0, "Expected memory transaction"
+    assert txn['size_bytes'] == 4, f"Expected 4-byte write, got {txn['size_bytes']}B"
 
     # Test 2: Clear and test with Relaxed Ordering (attr=0b10) and Translation Request (at=0b01)
     await write_bar0_register(bfm, REG_TXN_CTRL, 0x03)  # Clear FIFO (keep enabled)
@@ -361,10 +376,12 @@ async def test_monitor_extracts_attributes(dut):
     if txn2 is None:
         raise AssertionError("No transaction captured for test 2")
 
-    dut._log.info(f"Test 2 Captured: attr=0b{txn2['attr']:02b}, at=0b{txn2['at']:02b}")
-
-    assert txn2['attr'] == test_attr2, f"Expected attr=0b{test_attr2:02b}, got 0b{txn2['attr']:02b}"
-    assert txn2['at'] == test_at2, f"Expected at=0b{test_at2:02b}, got 0b{txn2['at']:02b}"
+    dut._log.info(
+        f"Test 2 Captured: read={txn2['is_read']}, cfg={txn2['is_cfg']}, size={txn2['size_bytes']}B"
+    )
+    assert txn2['we'] == 1, "Expected write"
+    assert txn2['is_cfg'] == 0, "Expected memory transaction"
+    assert txn2['size_bytes'] == 4, f"Expected 4-byte write, got {txn2['size_bytes']}B"
 
     dut._log.info("test_monitor_extracts_attributes PASSED")
 
@@ -372,9 +389,7 @@ async def test_monitor_extracts_attributes(dut):
 @cocotb.test(timeout_time=100, timeout_unit="us")
 async def test_monitor_captures_bar_hits(dut):
     """
-    Verify monitor correctly captures different BAR hit values.
-
-    Tests BAR0, BAR1, and BAR2 hits to ensure bar_hit field is captured correctly.
+    Verify monitor captures writes to different BAR windows.
     """
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
 
@@ -410,12 +425,10 @@ async def test_monitor_captures_bar_hits(dut):
         if txn is None:
             raise AssertionError(f"No transaction captured for BAR{tc['bar_num']}")
 
-        expected_bar_hit = tc['bar_hit'] & 0x7  # Only lower 3 bits stored
-        dut._log.info(f"BAR{tc['bar_num']}: captured bar_hit=0b{txn['bar_hit']:03b}, "
-                      f"addr=0x{txn['address']:08X}, data=0x{txn['data_lo']:08X}")
+        dut._log.info(
+            f"BAR{tc['bar_num']}: captured addr=0x{txn['address']:08X}, data=0x{txn['data_lo']:08X}"
+        )
 
-        assert txn['bar_hit'] == expected_bar_hit, \
-            f"BAR{tc['bar_num']}: Expected bar_hit=0b{expected_bar_hit:03b}, got 0b{txn['bar_hit']:03b}"
         assert txn['address'] == tc['address'], \
             f"BAR{tc['bar_num']}: Expected address=0x{tc['address']:08X}, got 0x{txn['address']:08X}"
         assert txn['data_lo'] == tc['data'], \
@@ -480,9 +493,9 @@ async def test_monitor_fifo_clear(dut):
 @cocotb.test(timeout_time=100, timeout_unit="us")
 async def test_monitor_captures_first_be_partial(dut):
     """
-    Verify monitor captures partial first_be values correctly.
+    Verify monitor encodes size from partial first_be values.
 
-    Tests various first_be patterns to ensure they are captured in the FIFO.
+    Tests various first_be patterns to validate byte-size encoding.
     This is required for BSA ACS e022 compliance verification.
     """
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
@@ -490,25 +503,16 @@ async def test_monitor_captures_first_be_partial(dut):
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
 
-    # Test cases: (first_be, description)
-    # For single DWORD TLPs, any first_be pattern is valid per PCIe spec
+    # Test cases: (first_be, expected_bytes, description)
     test_cases = [
-        (0x1, "byte 0 only"),
-        (0x2, "byte 1 only"),
-        (0x3, "bytes 0-1"),
-        (0x4, "byte 2 only"),
-        (0x5, "bytes 0,2 (non-contiguous)"),
-        (0x6, "bytes 1-2"),
-        (0x7, "bytes 0-2"),
-        (0x8, "byte 3 only"),
-        (0x9, "bytes 0,3 (non-contiguous)"),
-        (0xA, "bytes 1,3 (non-contiguous)"),
-        (0xC, "bytes 2-3"),
-        (0xE, "bytes 1-3"),
-        (0xF, "all bytes"),
+        (0x1, 1, "byte 0 only"),
+        (0x3, 2, "bytes 0-1"),
+        (0x5, 2, "bytes 0,2 (non-contiguous)"),
+        (0xC, 2, "bytes 2-3"),
+        (0xF, 4, "all bytes"),
     ]
 
-    for first_be, desc in test_cases:
+    for first_be, expected_bytes, desc in test_cases:
         dut._log.info(f"--- Testing first_be=0x{first_be:X} ({desc}) ---")
 
         # Enable and clear FIFO
@@ -534,16 +538,9 @@ async def test_monitor_captures_first_be_partial(dut):
         if txn is None:
             raise AssertionError(f"No transaction captured for first_be=0x{first_be:X}")
 
-        dut._log.info(f"Captured: first_be=0x{txn['first_be']:X}, last_be=0x{txn['last_be']:X}")
-
-        if txn['first_be'] == first_be:
-            dut._log.info(f"PASS: first_be=0x{first_be:X} captured correctly")
-        else:
-            raise AssertionError(
-                f"first_be mismatch!\n"
-                f"  Expected: 0x{first_be:X} ({desc})\n"
-                f"  Got:      0x{txn['first_be']:X}"
-            )
+        dut._log.info(f"Captured: size={txn['size_bytes']}B")
+        assert txn['size_bytes'] == expected_bytes, \
+            f"Size mismatch: expected {expected_bytes}B, got {txn['size_bytes']}B"
 
     dut._log.info("test_monitor_captures_first_be_partial PASSED")
 
@@ -551,24 +548,23 @@ async def test_monitor_captures_first_be_partial(dut):
 @cocotb.test(timeout_time=100, timeout_unit="us")
 async def test_monitor_captures_multi_dword_be(dut):
     """
-    Verify monitor captures first_be and last_be for multi-DWORD writes.
+    Verify monitor encodes size correctly for multi-DWORD writes.
 
-    For multi-DWORD TLPs, both first_be and last_be should be non-zero.
+    For multi-DWORD TLPs, size should reflect enabled bytes in the beat.
     """
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
 
-    # Test cases: (first_be, last_be, num_dwords, description)
+    # Test cases: (first_be, last_be, expected_bytes, description)
     test_cases = [
-        (0xF, 0xF, 2, "full 2 DWORDs"),
-        (0x3, 0xC, 2, "lower first, upper last"),
-        (0xF, 0x1, 2, "full first, byte 0 last"),
-        (0x8, 0xF, 2, "byte 3 first, full last"),
+        (0xF, 0xF, 8, "full 2 DWORDs"),
+        (0x3, 0xC, 4, "lower first, upper last"),
+        (0x8, 0x1, 2, "byte 3 first, byte 0 last"),
     ]
 
-    for first_be, last_be, num_dwords, desc in test_cases:
+    for first_be, last_be, expected_bytes, desc in test_cases:
         dut._log.info(f"--- Testing {desc}: first_be=0x{first_be:X}, last_be=0x{last_be:X} ---")
 
         # Enable and clear FIFO
@@ -596,14 +592,9 @@ async def test_monitor_captures_multi_dword_be(dut):
         if txn is None:
             raise AssertionError(f"No transaction captured for {desc}")
 
-        dut._log.info(f"Captured: len={txn['length']}, first_be=0x{txn['first_be']:X}, last_be=0x{txn['last_be']:X}")
-
-        assert txn['length'] == num_dwords, \
-            f"Length mismatch: expected {num_dwords}, got {txn['length']}"
-        assert txn['first_be'] == first_be, \
-            f"first_be mismatch: expected 0x{first_be:X}, got 0x{txn['first_be']:X}"
-        assert txn['last_be'] == last_be, \
-            f"last_be mismatch: expected 0x{last_be:X}, got 0x{txn['last_be']:X}"
+        dut._log.info(f"Captured: size={txn['size_bytes']}B")
+        assert txn['size_bytes'] == expected_bytes, \
+            f"Size mismatch: expected {expected_bytes}B, got {txn['size_bytes']}B"
 
         dut._log.info(f"PASS: {desc}")
 
@@ -613,24 +604,24 @@ async def test_monitor_captures_multi_dword_be(dut):
 @cocotb.test(timeout_time=100, timeout_unit="us")
 async def test_monitor_captures_read_first_be(dut):
     """
-    Verify monitor captures first_be for Memory Read TLPs.
+    Verify monitor encodes size correctly for Memory Read TLPs.
 
-    Memory reads also have first_be/last_be to indicate which bytes are requested.
+    Memory reads use first_be to indicate which bytes are requested.
     """
     cocotb.start_soon(Clock(dut.sys_clk, 8, unit="ns").start())
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
 
-    # Test cases for reads
+    # Test cases for reads: (first_be, expected_bytes, description)
     test_cases = [
-        (0xF, "full DWORD"),
-        (0x3, "lower 2 bytes"),
-        (0xC, "upper 2 bytes"),
-        (0x1, "byte 0 only"),
+        (0xF, 4, "full DWORD"),
+        (0x3, 2, "lower 2 bytes"),
+        (0xC, 2, "upper 2 bytes"),
+        (0x1, 1, "byte 0 only"),
     ]
 
-    for first_be, desc in test_cases:
+    for first_be, expected_bytes, desc in test_cases:
         dut._log.info(f"--- Testing read first_be=0x{first_be:X} ({desc}) ---")
 
         # Enable and clear FIFO
@@ -659,11 +650,11 @@ async def test_monitor_captures_read_first_be(dut):
         if txn is None:
             raise AssertionError(f"No transaction captured for read first_be=0x{first_be:X}")
 
-        dut._log.info(f"Captured: we={txn['we']}, first_be=0x{txn['first_be']:X}")
+        dut._log.info(f"Captured: we={txn['we']}, size={txn['size_bytes']}B")
 
         assert txn['we'] == 0, "Expected read (we=0)"
-        assert txn['first_be'] == first_be, \
-            f"first_be mismatch: expected 0x{first_be:X}, got 0x{txn['first_be']:X}"
+        assert txn['size_bytes'] == expected_bytes, \
+            f"Size mismatch: expected {expected_bytes}B, got {txn['size_bytes']}B"
 
         dut._log.info(f"PASS: read first_be=0x{first_be:X}")
 
@@ -673,7 +664,7 @@ async def test_monitor_captures_read_first_be(dut):
 @cocotb.test(timeout_time=100, timeout_unit="us")
 async def test_monitor_be_zero_handling(dut):
     """
-    Verify monitor correctly captures first_be=0 (no bytes enabled).
+    Verify monitor handles first_be=0 (no bytes enabled).
 
     Per PCIe spec, first_be=0 is valid for zero-length reads.
     This tests edge case handling.
@@ -706,10 +697,10 @@ async def test_monitor_be_zero_handling(dut):
     if txn is None:
         raise AssertionError("No transaction captured for first_be=0x0")
 
-    dut._log.info(f"Captured: first_be=0x{txn['first_be']:X}, last_be=0x{txn['last_be']:X}")
+    dut._log.info(f"Captured: size={txn['size_bytes']}B")
 
-    assert txn['first_be'] == 0x0, \
-        f"first_be mismatch: expected 0x0, got 0x{txn['first_be']:X}"
+    assert txn['size_bytes'] == 0, \
+        f"Size mismatch: expected 0B, got {txn['size_bytes']}B"
 
     dut._log.info("test_monitor_be_zero_handling PASSED")
 
@@ -904,7 +895,12 @@ async def test_monitor_fifo_overflow_recovery(dut):
     for i in range(5):
         txn = await read_fifo_transaction(bfm)
         assert txn is not None, f"Expected transaction {i}"
-        assert txn['bar_hit'] == 0b010, f"Expected BAR1 hit, got {txn['bar_hit']:03b}"
+        expected_addr = 0x300 + (i * 4)
+        expected_data = 0x55000000 | i
+        assert txn['address'] == expected_addr, \
+            f"Expected address 0x{expected_addr:08X}, got 0x{txn['address']:08X}"
+        assert txn['data_lo'] == expected_data, \
+            f"Expected data 0x{expected_data:08X}, got 0x{txn['data_lo']:08X}"
     dut._log.info("All 5 BAR1 transactions captured correctly")
 
     dut._log.info("PASS: FIFO and overflow recovered after clear")

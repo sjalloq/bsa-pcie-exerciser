@@ -32,15 +32,12 @@ class TransactionMonitor(LiteXModule):
         Number of transactions to buffer (default: 16).
 
     Capture Layout (per transaction):
-        - Word 0: Attributes
-            [0]     : we (1=write, 0=read)
-            [3:1]   : bar_hit[2:0]
-            [13:4]  : len[9:0]
-            [17:14] : first_be[3:0]
-            [21:18] : last_be[3:0]
-            [23:22] : attr[1:0] (relaxed ordering, no snoop)
-            [25:24] : at[1:0] (address type)
-            [31:26] : reserved
+        - Word 0: TX_ATTRIBUTES (ACS encoding)
+            [0]     : type (CFG only: 0=Type0, 1=Type1)
+            [1]     : R/W (1=read, 0=write)
+            [2]     : CFG/MEM (1=CFG, 0=MEM)
+            [15:3]  : reserved
+            [31:16] : byte size one-hot (bit = log2(bytes))
         - Word 1: ADDRESS[31:0]
         - Word 2: ADDRESS[63:32]
         - Word 3: DATA[31:0]
@@ -72,7 +69,7 @@ class TransactionMonitor(LiteXModule):
         # Tap Interface (connects to depacketizer.req_source)
         # =====================================================================
 
-        # Input tap - directly connected to request stream
+        # Input tap - request stream (memory transactions)
         self.tap_valid   = Signal()
         self.tap_first   = Signal()
         self.tap_last    = Signal()
@@ -87,6 +84,21 @@ class TransactionMonitor(LiteXModule):
         self.tap_at       = Signal(2)
         self.tap_req_id   = Signal(16)
         self.tap_tag      = Signal(8)
+
+        # Input tap - configuration transactions
+        self.tap_cfg_valid = Signal()
+        self.tap_cfg_first = Signal()
+        self.tap_cfg_last  = Signal()
+        self.tap_cfg_we    = Signal()
+        self.tap_cfg_type  = Signal()     # 0=Type0, 1=Type1
+        self.tap_cfg_bus_number  = Signal(8)
+        self.tap_cfg_device_no   = Signal(5)
+        self.tap_cfg_func        = Signal(3)
+        self.tap_cfg_ext_reg     = Signal(3)
+        self.tap_cfg_register_no = Signal(6)
+        self.tap_cfg_tag         = Signal(8)
+        self.tap_cfg_first_be    = Signal(4)
+        self.tap_cfg_dat         = Signal(data_width)
 
         # =====================================================================
         # Control Interface (from BSARegisters)
@@ -142,35 +154,146 @@ class TransactionMonitor(LiteXModule):
         # Capture Logic
         # =====================================================================
 
-        # Build capture entry from tap signals
-        # Word 0: Attributes
+        # Build capture entry from tap signals (ACS TXN_TRACE encoding)
+        assert data_width == 64, "Transaction monitor TXN_TRACE encoding assumes 64-bit data width"
+
+        bytes_per_beat = data_width // 8
+
+        # Track current beat address for memory requests
+        mem_base_addr = Signal(64)
+        mem_beat_index = Signal(16)
+        mem_addr = Signal(64)
+        mem_base_addr_cap = Signal(64)
+        mem_beat_index_cap = Signal(16)
+        self.comb += [
+            mem_base_addr_cap.eq(Mux(self.tap_first, self.tap_adr, mem_base_addr)),
+            mem_beat_index_cap.eq(Mux(self.tap_first, 0, mem_beat_index)),
+            mem_addr.eq(mem_base_addr_cap + mem_beat_index_cap * bytes_per_beat),
+        ]
+
+        self.sync += [
+            If(self.clear,
+                mem_base_addr.eq(0),
+                mem_beat_index.eq(0),
+            ).Elif(self.tap_valid & self.tap_first,
+                mem_base_addr.eq(self.tap_adr),
+                mem_beat_index.eq(0),
+            ).Elif(self.tap_valid,
+                mem_beat_index.eq(mem_beat_index + 1),
+            ),
+        ]
+
+        # Configuration address encoding (BDF + register offset)
+        cfg_addr = Signal(64)
+        self.comb += cfg_addr.eq(
+            (self.tap_cfg_bus_number << 20) |
+            (self.tap_cfg_device_no  << 15) |
+            (self.tap_cfg_func       << 12) |
+            (self.tap_cfg_ext_reg    << 9)  |
+            (self.tap_cfg_register_no << 2)
+        )
+
+        # Select capture source: configuration has priority if both present
+        use_cfg = Signal()
+        use_mem = Signal()
+        cap_valid = Signal()
+        self.comb += [
+            use_cfg.eq(self.tap_cfg_valid),
+            use_mem.eq(self.tap_valid & ~self.tap_cfg_valid),
+            cap_valid.eq(use_cfg | use_mem),
+        ]
+
+        cap_we = Signal()
+        cap_addr = Signal(64)
+        cap_dat = Signal(data_width)
+        cap_first_be = Signal(4)
+        cap_last_be = Signal(4)
+        cap_cfg_type = Signal()
+
+        self.comb += [
+            cap_we.eq(Mux(use_cfg, self.tap_cfg_we, self.tap_we)),
+            cap_addr.eq(Mux(use_cfg, cfg_addr, mem_addr)),
+            cap_dat.eq(Mux(use_cfg, self.tap_cfg_dat, self.tap_dat)),
+            cap_first_be.eq(Mux(use_cfg, self.tap_cfg_first_be, self.tap_first_be)),
+            cap_last_be.eq(Mux(use_cfg, 0, self.tap_last_be)),
+            cap_cfg_type.eq(Mux(use_cfg, self.tap_cfg_type, 0)),
+        ]
+
+        # Byte enables for this beat (64-bit data width)
+        mem_byte_en = Signal(8)
+        cfg_byte_en = Signal(8)
+        byte_en = Signal(8)
+
+        self.comb += [
+            mem_byte_en.eq(0),
+            If(self.tap_first & self.tap_last,
+                If(self.tap_len == 1,
+                    mem_byte_en.eq(Cat(self.tap_first_be, Constant(0, 4))),
+                ).Else(
+                    mem_byte_en.eq(Cat(self.tap_first_be, self.tap_last_be)),
+                ),
+            ).Elif(self.tap_first,
+                mem_byte_en.eq(Cat(self.tap_first_be, Constant(0xF, 4))),
+            ).Elif(self.tap_last,
+                If(self.tap_len[0],
+                    mem_byte_en.eq(Cat(self.tap_last_be, Constant(0, 4))),
+                ).Else(
+                    mem_byte_en.eq(Cat(Constant(0xF, 4), self.tap_last_be)),
+                ),
+            ).Else(
+                mem_byte_en.eq(0xFF),
+            ),
+            cfg_byte_en.eq(Cat(self.tap_cfg_first_be, Constant(0, 4))),
+            byte_en.eq(Mux(use_cfg, cfg_byte_en, mem_byte_en)),
+        ]
+
+        # Byte size encoding (upper 16 bits): one-hot log2(bytes)
+        bytes_in_beat = Signal(4)
+        self.comb += bytes_in_beat.eq(
+            byte_en[0] + byte_en[1] + byte_en[2] + byte_en[3] +
+            byte_en[4] + byte_en[5] + byte_en[6] + byte_en[7]
+        )
+
+        size_onehot = Signal(16)
+        self.comb += size_onehot.eq(
+            Mux(bytes_in_beat == 1, 1 << 0,
+            Mux(bytes_in_beat == 2, 1 << 1,
+            Mux(bytes_in_beat == 4, 1 << 2,
+            Mux(bytes_in_beat == 8, 1 << 3, 0))))
+        )
+
+        # Lower 16 bits: [2]=cfg/mem, [1]=read, [0]=type (Type0/Type1)
+        read_bit = Signal()
+        tx_attr_lower = Signal(16)
+        self.comb += [
+            read_bit.eq(~cap_we),
+            tx_attr_lower.eq(Cat(
+                cap_cfg_type,     # [0] type (cfg only)
+                read_bit,         # [1] read=1, write=0
+                use_cfg,          # [2] cfg=1, mem=0
+                Constant(0, 13),  # [15:3] reserved
+            )),
+        ]
+
+        # Word 0: TX_ATTRIBUTES
         word0 = Signal(32)
-        self.comb += word0.eq(Cat(
-            self.tap_we,                    # [0]
-            self.tap_bar_hit[:3],           # [3:1]
-            self.tap_len,                   # [13:4]
-            self.tap_first_be,              # [17:14]
-            self.tap_last_be,               # [21:18]
-            self.tap_attr,                  # [23:22]
-            self.tap_at,                    # [25:24]
-            Constant(0, 6),                 # [31:26] reserved
-        ))
+        self.comb += word0.eq(Cat(tx_attr_lower, size_onehot))
 
         # Word 1: ADDRESS[31:0]
         word1 = Signal(32)
-        self.comb += word1.eq(self.tap_adr[:32])
+        self.comb += word1.eq(cap_addr[:32])
 
         # Word 2: ADDRESS[63:32]
         word2 = Signal(32)
-        self.comb += word2.eq(self.tap_adr[32:64])
+        self.comb += word2.eq(cap_addr[32:64])
 
         # Word 3: DATA[31:0]
         word3 = Signal(32)
-        self.comb += word3.eq(self.tap_dat[:32])
+        self.comb += word3.eq(cap_dat[:32])
 
         # Word 4: DATA[63:32]
         word4 = Signal(32)
-        self.comb += word4.eq(self.tap_dat[32:64])
+        self.comb += word4.eq(cap_dat[32:64])
 
         # Combined entry
         capture_entry = Signal(entry_width)
@@ -189,17 +312,17 @@ class TransactionMonitor(LiteXModule):
         REG_TXN_CTRL = 0x044
         is_txn_ctrl = Signal()
         self.comb += is_txn_ctrl.eq(
-            self.tap_bar_hit[0] & (self.tap_adr[:12] == REG_TXN_CTRL)
+            self.tap_valid & self.tap_bar_hit[0] & (self.tap_adr[:12] == REG_TXN_CTRL)
         )
 
         self.comb += [
             fifo_full.eq(count == fifo_depth),
-            txn_arriving.eq(self.enable & self.tap_valid & self.tap_first & ~is_txn_ctrl),
+            txn_arriving.eq(self.enable & cap_valid & ~is_txn_ctrl),
             txn_dropped.eq(txn_arriving & (fifo_full | overflow_reg)),
             self.overflow.eq(overflow_reg),
         ]
 
-        # Capture on first beat of valid transaction when enabled and not in overflow
+        # Capture on each beat when enabled and not in overflow
         do_capture = Signal()
         self.comb += [
             do_capture.eq(

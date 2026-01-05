@@ -41,8 +41,8 @@ SoC Block Diagram
     │   │ Registers │    │   (16KB)    │      └─────────────┘      │    │
     │   └───────────┘    └─────────────┘                           │    │
     │                                                              │    │
-    │   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │    │
-    │   │ MSI-X Table │  │  MSI-X PBA  │  │   MSI-X Controller  │──┘    │
+    │   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐       │
+    │   │ MSI-X Table │  │  MSI-X PBA  │  │   MSI-X Controller  │       │
     │   │   (BAR2)    │  │   (BAR5)    │  └─────────────────────┘       │
     │   └─────────────┘  └─────────────┘                                │
     │                                                                   │
@@ -50,6 +50,14 @@ SoC Block Diagram
     │   │ ATS Engine  │  │     ATC     │  │  ATS Invalidation   │       │
     │   └─────────────┘  └─────────────┘  │      Handler        │       │
     │                                     └─────────────────────┘       │
+    │                                                                   │
+    │   ┌─────────────────────┐                                         │
+    │   │ Transaction Monitor │                                         │
+    │   └─────────────────────┘                                         │
+    │                                                                   │
+    │   ┌─────────────────────┐                                         │
+    │   │ PASID Prefix Inject │                                         │
+    │   └─────────────────────┘                                         │
     └───────────────────────────────────────────────────────────────────┘
 
 BAR Layout
@@ -72,7 +80,7 @@ BAR Layout
      - BSADMABufferHandler
    * - BAR2
      - 32KB
-     - MSI-X Table
+     - MSI-X Table (16 entries implemented)
      - LitePCIeMSIXTable
    * - BAR3
      - —
@@ -84,7 +92,7 @@ BAR Layout
      - Stub
    * - BAR5
      - 4KB
-     - MSI-X PBA
+     - MSI-X PBA (16 bits used)
      - LitePCIeMSIXPBA
 
 Data Flow
@@ -100,7 +108,8 @@ RX Path (Host → Exerciser)
 
    * BAR0: Wishbone bridge performs CSR read/write
    * BAR1: DMA buffer handler performs memory read/write
-   * BAR2/5: MSI-X table/PBA access
+   * BAR2/5: MSI-X table/PBA access (lower entries only)
+   * Transaction monitor taps the request stream for logging
 
 5. Completion arbiter collects responses from all BARs
 6. Packetizer formats completion TLP
@@ -113,7 +122,7 @@ TX Path (Exerciser → Host)
 2. Master arbiter selects between pending requests
 3. Packetizer formats request TLP
 4. PASID prefix injector adds prefix if enabled
-5. TX arbiter selects between main path and raw sources
+5. TX arbiter selects between main path and raw sources (ATS invalidation)
 6. PHY transmits TLP
 
 Key Components

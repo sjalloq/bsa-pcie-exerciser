@@ -156,7 +156,7 @@ Configure and trigger MSI-X interrupts.
    * - [10:0]
      - vector_id
      - RW
-     - MSI-X vector index (0-2047)
+     - MSI-X vector index (0-15 used)
    * - [30:11]
      - reserved
      - RO
@@ -457,13 +457,16 @@ Read captured transactions from FIFO.
      - RO
      - Next FIFO word. Returns 0xFFFFFFFF when empty.
 
-**Transaction Record Format** (5 words per transaction):
+**Transaction Record Format** (5 words per transaction beat):
 
-1. TX_ATTRIBUTES: [0]=type, [1]=R/W, [2]=CFG/MEM, [31:16]=byte size (log2)
+1. TX_ATTRIBUTES: [0]=type, [1]=R/W, [2]=CFG/MEM, [31:16]=byte size one-hot (log2)
 2. ADDRESS[31:0]
 3. ADDRESS[63:32]
 4. DATA[31:0]
 5. DATA[63:32]
+
+The byte size field uses a one-hot encoding of log2(bytes) (e.g., 1B -> bit0,
+2B -> bit1, 4B -> bit2, 8B -> bit3). Each beat is recorded as a separate entry.
 
 ----
 

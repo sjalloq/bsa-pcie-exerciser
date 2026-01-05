@@ -12,7 +12,7 @@ upstream LitePCIe implementation:
 
 1. Multiple BARs (BAR0, BAR1, BAR2, BAR5)
 2. BAR hit detection and routing
-3. MSI-X support with 2048 vectors
+3. MSI-X support with 16 implemented vectors (32KB/4KB windows retained)
 4. TLP attribute control (No-Snoop, Relaxed Ordering, etc.)
 
 These modifications target the Xilinx 7-Series PHY (S7PCIEPHY) initially.
@@ -41,7 +41,7 @@ The BSA exerciser requires the following BAR configuration:
    * - BAR2
      - 32KB
      - No
-     - MSI-X Table (2048 entries × 16 bytes)
+     - MSI-X Table window (16 entries implemented)
    * - BAR3
      - --
      - --
@@ -77,6 +77,7 @@ The offset within BAR1 is configured via the DMA Offset Register (0x0C in BAR0).
 **BAR2/BAR5 - MSI-X**
 
 Standard MSI-X table and PBA locations as per PCIe specification.
+Only the first 16 vectors are implemented; accesses beyond are reserved.
 
 PHY Modifications
 -----------------
@@ -137,7 +138,7 @@ Required additions for BSA:
 
         # MSI-X Configuration
         "MSIx_Enabled"      : True,
-        "MSIx_Table_Size"   : "800",  # 2048 in hex
+        "MSIx_Table_Size"   : "7FF",  # 2048 advertised (N-1 encoding)
         "MSIx_Table_Bar"    : 2,
         "MSIx_PBA_Bar"      : 5,
         "MSIx_Table_Offset" : "0",

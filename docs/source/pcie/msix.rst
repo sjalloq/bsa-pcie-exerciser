@@ -128,7 +128,7 @@ The BSA Exerciser uses the following BAR configuration for MSI-X:
      - DMA Buffer (reserved for Phase 4)
    * - BAR2
      - 32KB
-     - MSI-X Table (2048 vectors x 16 bytes)
+     - MSI-X Table (16 vectors x 16 bytes, 256 bytes used)
    * - BAR3
      - --
      - Disabled
@@ -137,12 +137,12 @@ The BSA Exerciser uses the following BAR configuration for MSI-X:
      - Disabled
    * - BAR5
      - 4KB
-     - MSI-X Pending Bit Array (2048 bits = 256 bytes)
+     - MSI-X Pending Bit Array (16 bits used)
 
 MSI-X Table Structure (BAR2)
 ----------------------------
 
-Each of the 2048 table entries is 16 bytes (4 DWORDs):
+Each table entry is 16 bytes (4 DWORDs). The exerciser implements 16 entries:
 
 .. code-block:: text
 
@@ -153,7 +153,7 @@ Each of the 2048 table entries is 16 bytes (4 DWORDs):
    0x08    32-bit   Message Data       Value written to trigger interrupt
    0x0C    32-bit   Vector Control     Bit 0: Mask (1=masked, 0=enabled)
 
-Total table size: 2048 vectors x 16 bytes = 32,768 bytes (32KB)
+Total implemented size: 16 vectors x 16 bytes = 256 bytes (within a 32KB BAR window)
 
 **Memory organisation**: The table is implemented as dual-port memory:
 
@@ -173,15 +173,12 @@ The PBA is a bitmap with one bit per vector:
 
 .. code-block:: text
 
-   PBA Layout (2048 vectors):
+   PBA Layout (16 vectors):
    ┌─────────────────────────────────────────────────────────────┐
-   │ DWORD 0:  Vectors 0-31   (bits 0-31)                        │
-   │ DWORD 1:  Vectors 32-63  (bits 0-31)                        │
-   │ ...                                                         │
-   │ DWORD 63: Vectors 2016-2047 (bits 0-31)                     │
+   │ DWORD 0: Vectors 0-15 (bits 0-15), bits 16-31 reserved      │
    └─────────────────────────────────────────────────────────────┘
 
-Total PBA size: 2048 bits = 64 DWORDs = 256 bytes
+Total implemented size: 16 bits (lower bits of DWORD 0 within a 4KB BAR window)
 
 The PBA is **read-only from the host's perspective**. Writes from the host are
 silently ignored. The MSI-X controller sets/clears pending bits internally.
@@ -232,8 +229,7 @@ When the BSA Exerciser needs to signal an interrupt:
 .. code-block:: text
 
    1. Trigger Source
-      ├── Software: Write to MSI-X Trigger CSR (BAR0)
-      └── Hardware: Internal IRQ signal asserted
+      └── Software: Write to MSICTL (BAR0)
                 │
                 ▼
    2. MSI-X Controller receives trigger for vector N
@@ -268,39 +264,31 @@ When the BSA Exerciser needs to signal an interrupt:
 Software-Triggered Interrupts (BSA Testing)
 -------------------------------------------
 
-For BSA compliance testing, software needs to trigger arbitrary MSI-X vectors.
-The ``LitePCIeMSITrigger`` module provides a CSR interface on BAR0:
+For BSA compliance testing, software triggers MSI-X vectors via ``MSICTL``:
 
-.. list-table:: MSI-X Trigger CSR (BAR0)
+.. list-table:: MSI-X Control (MSICTL, BAR0)
    :header-rows: 1
    :widths: 20 15 65
 
    * - Field
      - Bits
      - Description
-   * - vector
+   * - vector_id
      - [10:0]
-     - MSI-X vector number to trigger (0-2047)
+     - MSI-X vector number to trigger (0-15 used)
    * - trigger
-     - [15]
-     - Write 1 to trigger the specified vector
-   * - busy
-     - [0] (status)
-     - Controller is processing a trigger (read-only)
+     - [31]
+     - Write 1 to trigger the specified vector (self-clearing)
 
 Usage from host:
 
 .. code-block:: c
 
-   // Trigger vector 42
+   // Trigger vector 5
    void __iomem *csr = pci_iomap(pdev, 0, 0);  // Map BAR0
 
-   // Wait for not busy
-   while (readl(csr + MSIX_TRIGGER_STATUS) & 0x1)
-       cpu_relax();
-
-   // Trigger: vector=42, trigger bit=1
-   writel((42) | (1 << 15), csr + MSIX_TRIGGER_CONTROL);
+   // Trigger: vector=5, trigger bit=1
+   writel((5) | (1u << 31), csr + MSICTL);
 
 This allows BSA test suites to verify:
 
@@ -308,19 +296,3 @@ This allows BSA test suites to verify:
 - Masking behaviour (pending bit set when masked)
 - Address translation (SMMU/IOMMU) of interrupt writes
 - Interrupt controller configuration
-
-Hardware IRQ Support
---------------------
-
-The BSA Exerciser also supports hardware-triggered interrupts for internal
-events. The ``LitePCIeMSIXController`` accepts up to 32 hardware IRQ inputs,
-directly mapped to vectors 0-31.
-
-Priority handling:
-
-1. Software triggers (via CSR) have **highest priority**
-2. Hardware IRQs use priority encoding (lower vector = higher priority)
-3. Pending hardware IRQs are sticky until serviced
-
-This allows future phases to signal events like DMA completion, error
-conditions, or test completion via MSI-X.

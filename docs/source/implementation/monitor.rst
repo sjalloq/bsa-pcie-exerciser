@@ -2,16 +2,15 @@ Transaction Monitor
 ===================
 
 The ``TransactionMonitor`` captures incoming PCIe transactions for software
-inspection, enabling verification of TLP attributes and request parameters.
+inspection, enabling verification of request ordering and data payloads.
 
-Source: ``src/bsa_pcie_exerciser/monitor/txn_monitor.py``
+Source: ``src/bsa_pcie_exerciser/gateware/monitor/txn_monitor.py``
 
 Overview
 --------
 
 The monitor taps into the request stream from the depacketizer and captures
-transaction metadata into a FIFO. Software can read captured transactions
-via control registers.
+each data beat into a FIFO. Software reads the FIFO via CSR registers.
 
 Architecture
 ------------
@@ -56,50 +55,36 @@ The monitor observes transactions without affecting the data path:
         # ... other fields ...
     ]
 
-Captured Fields
----------------
+Transaction Record Format
+-------------------------
 
-Each FIFO entry (64 bits) contains:
+Each captured beat produces a 5-word (32-bit) record:
 
 .. list-table::
    :header-rows: 1
 
-   * - Bits
-     - Field
+   * - Word
+     - Name
      - Description
-   * - [0]
-     - we
-     - Write enable (1=write, 0=read)
-   * - [6:1]
-     - bar_hit
-     - BAR hit field
-   * - [8:7]
-     - attr
-     - TLP attributes (No-Snoop, RO)
-   * - [10:9]
-     - at
-     - Address Type field
-   * - [14:11]
-     - first_be
-     - First DWORD byte enables
-   * - [18:15]
-     - last_be
-     - Last DWORD byte enables
-   * - [28:19]
-     - len
-     - Length in DWORDs
-   * - [36:29]
-     - tag
-     - Transaction tag
-   * - [52:37]
-     - req_id
-     - Requester ID
-   * - [63:53]
-     - Reserved
-     -
+   * - 0
+     - TX_ATTRIBUTES
+     - [0]=type (cfg only), [1]=read, [2]=cfg, [31:16]=byte size one-hot
+   * - 1
+     - ADDRESS[31:0]
+     - Lower 32 bits of address (CFG or MEM)
+   * - 2
+     - ADDRESS[63:32]
+     - Upper 32 bits of address
+   * - 3
+     - DATA[31:0]
+     - Lower 32 bits of data
+   * - 4
+     - DATA[63:32]
+     - Upper 32 bits of data
 
-Address is captured separately or in subsequent FIFO entries depending
-on implementation.
+The byte size field uses a one-hot encoding of log2(bytes). For example,
+1 byte sets bit 0, 2 bytes sets bit 1, 4 bytes sets bit 2, and 8 bytes
+sets bit 3. Each beat is recorded as a separate transaction entry.
 
 Control Interface
 -----------------
@@ -118,9 +103,9 @@ Software Interface
 
 Via BSA registers:
 
-* **TXNCTL[0]**: Enable monitoring
-* **TXNCTL[1]**: Clear FIFO (write 1 to clear)
-* **TXNDATA**: Read captured transaction (auto-advances FIFO)
+* **TXN_CTRL[0]**: Enable monitoring
+* **TXN_CTRL[1]**: Clear FIFO (write 1 to clear)
+* **TXN_TRACE**: Read captured transaction (auto-advances FIFO)
 
 Usage Example
 -------------
@@ -129,7 +114,7 @@ Usage Example
 2. Software triggers DMA or other operation
 3. Monitor captures incoming TLPs to FIFO
 4. Software reads ``TXNDATA`` repeatedly until empty
-5. Software verifies TLP attributes match expectations
+5. Software verifies ordering, size, and data payloads match expectations
 
 Use Cases
 ---------

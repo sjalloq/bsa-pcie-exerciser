@@ -7,15 +7,16 @@ The MSI-X implementation consists of three components:
 * **LitePCIeMSIXPBA**: BAR5 handler for Pending Bit Array
 * **LitePCIeMSIXController**: TLP generator for interrupt delivery
 
-Source: ``src/bsa_pcie_exerciser/msix/``
+Source: ``src/bsa_pcie_exerciser/gateware/msix/``
 
 MSI-X Table
 -----------
 
-Source: ``src/bsa_pcie_exerciser/msix/table.py``
+Source: ``src/bsa_pcie_exerciser/gateware/msix/table.py``
 
-The ``LitePCIeMSIXTable`` provides PCIe-accessible storage for 2048 MSI-X
-vectors (32KB).
+The ``LitePCIeMSIXTable`` provides PCIe-accessible storage for 16 MSI-X
+vectors (256 bytes) mapped at the base of the BAR2 window. The BAR2 window
+remains 32KB for compatibility; entries beyond vector 15 are reserved.
 
 Memory Layout
 ~~~~~~~~~~~~~
@@ -72,7 +73,7 @@ The controller reads table entries via dedicated signals:
 
 .. code-block:: python
 
-    self.vector_num = Signal(11)   # Which vector (0-2047)
+    self.vector_num = Signal(11)   # Which vector (0-15 used)
     self.read_en    = Signal()     # Trigger read
     self.read_valid = Signal()     # Data valid (after 3 cycles)
     self.msg_addr   = Signal(64)   # Message Address
@@ -82,11 +83,11 @@ The controller reads table entries via dedicated signals:
 MSI-X PBA
 ---------
 
-Source: ``src/bsa_pcie_exerciser/msix/table.py``
+Source: ``src/bsa_pcie_exerciser/gateware/msix/table.py``
 
 The ``LitePCIeMSIXPBA`` manages the Pending Bit Array:
 
-* 2048 bits (256 bytes) stored as 32 QWORDs
+* 16 bits stored in a single QWORD (8 bytes)
 * Read-only from PCIe perspective
 * Set/clear internally by controller
 
@@ -97,7 +98,7 @@ Internal Interface
 
     self.set_pending   = Signal()   # Pulse to set pending bit
     self.clear_pending = Signal()   # Pulse to clear pending bit
-    self.vector_num    = Signal(11) # Which vector to modify
+    self.vector_num    = Signal(11) # Which vector to modify (0-15 used)
 
 MSI-X Controller
 ----------------
@@ -150,8 +151,8 @@ Software Trigger Flow
 ---------------------
 
 1. Software writes vector number to ``MSICTL[10:0]``
-2. Software sets trigger bit ``MSICTL[15]``
+2. Software sets trigger bit ``MSICTL[31]``
 3. Controller latches vector, starts table read
 4. If unmasked: Memory Write TLP sent
 5. If masked: PBA bit set
-6. Software can poll busy status or proceed
+6. Trigger bit self-clears once accepted

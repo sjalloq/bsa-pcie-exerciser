@@ -122,7 +122,7 @@ class BSAExerciserSoC(SoCMini):
                 "Bar1_Type"         : "Memory",
                 "Bar1_Prefetchable" : False,
 
-                # BAR2: MSI-X Table (32KB for 2048 vectors)
+                # BAR2: MSI-X Table (sized for 2048 vectors, 16 used)
                 "Bar2_Enabled"      : True,
                 "Bar2_Scale"        : "Kilobytes",
                 "Bar2_Size"         : 32,
@@ -140,10 +140,10 @@ class BSAExerciserSoC(SoCMini):
                 "Bar5_Type"         : "Memory",
                 "Bar5_Prefetchable" : False,  # MSI-X must be non-prefetchable
 
-                # MSI-X Configuration (2048 vectors)
+                # MSI-X Configuration (16 vectors)
                 "MSI_Enabled"       : False,  # Disable legacy MSI
                 "MSIx_Enabled"      : True,
-                "MSIx_Table_Size"   : "7FF",  # 2048 vectors (N-1 encoding, hex)
+                "MSIx_Table_Size"   : "0F",   # 16 vectors (N-1 encoding, hex)
                 "MSIx_Table_BIR"    : "BAR_2",
                 "MSIx_Table_Offset" : "0",
                 "MSIx_PBA_BIR"      : "BAR_5",
@@ -235,6 +235,7 @@ class BSAExerciserSoC(SoCMini):
             },
             tx_filter    = self.pasid_injector,
             with_ats_inv = True,  # Enable ATS Invalidation Message handling
+            with_configuration = True,  # Tap configuration requests for TXN_TRACE
             # Raw TX sources: Message TLPs that bypass packetizer (e.g., ATS Inv Completion)
             raw_tx_sources = [self.ats_invalidation.msg_source],
         )
@@ -459,6 +460,25 @@ class BSAExerciserSoC(SoCMini):
             self.comb += self.txn_monitor.tap_attr.eq(req_source.attr)
         if hasattr(req_source, 'at'):
             self.comb += self.txn_monitor.tap_at.eq(req_source.at)
+
+        # Tap configuration requests for TXN_TRACE
+        conf_source = self.pcie_endpoint.conf_source
+        self.comb += [
+            conf_source.ready.eq(1),
+            self.txn_monitor.tap_cfg_valid.eq(conf_source.valid & conf_source.ready),
+            self.txn_monitor.tap_cfg_first.eq(conf_source.first),
+            self.txn_monitor.tap_cfg_last.eq(conf_source.last),
+            self.txn_monitor.tap_cfg_we.eq(conf_source.we),
+            self.txn_monitor.tap_cfg_type.eq(conf_source.cfg_type),
+            self.txn_monitor.tap_cfg_bus_number.eq(conf_source.bus_number),
+            self.txn_monitor.tap_cfg_device_no.eq(conf_source.device_no),
+            self.txn_monitor.tap_cfg_func.eq(conf_source.func),
+            self.txn_monitor.tap_cfg_ext_reg.eq(conf_source.ext_reg),
+            self.txn_monitor.tap_cfg_register_no.eq(conf_source.register_no),
+            self.txn_monitor.tap_cfg_tag.eq(conf_source.tag),
+            self.txn_monitor.tap_cfg_first_be.eq(conf_source.first_be),
+            self.txn_monitor.tap_cfg_dat.eq(conf_source.dat),
+        ]
 
         # Connect monitor control/status to BSA registers
         self.comb += [

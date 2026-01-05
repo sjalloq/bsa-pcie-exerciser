@@ -79,8 +79,9 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
                  bar_handlers=None,
                  tx_filter=None,
                  with_ats_inv=False,
+                 with_configuration=False,
                  raw_tx_sources=None):
-        
+
         self.phy        = phy
         self.data_width = phy.data_width
 
@@ -91,7 +92,7 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         # Default: no custom handlers
         if bar_handlers is None:
             bar_handlers = {}
-        
+
         # =====================================================================
         # TLP Depacketizer / Packetizer
         # =====================================================================
@@ -100,6 +101,8 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         depack_capabilities = ["REQUEST", "COMPLETION"]
         if with_ats_inv:
             depack_capabilities.append("ATS_INV")
+        if with_configuration:
+            depack_capabilities.append("CONFIGURATION")
 
         self.depacketizer = LitePCIeTLPDepacketizer(
             data_width   = phy.data_width,
@@ -111,14 +114,16 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         # Expose ATS Invalidation source if enabled
         if with_ats_inv:
             self.ats_inv_source = self.depacketizer.ats_inv_source
-        
+        if with_configuration:
+            self.conf_source = self.depacketizer.conf_source
+
         self.packetizer = LitePCIeTLPPacketizer(
             data_width    = phy.data_width,
             endianness    = endianness,
             address_width = address_width,
             capabilities  = ["REQUEST", "COMPLETION"],
         )
-        
+
         # Connect PHY
         # RX path: PHY → depacketizer
         self.comb += phy.source.connect(self.depacketizer.sink)
@@ -169,14 +174,14 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         else:
             # No additional sources, direct connection
             self.comb += main_tx_source.connect(phy.sink)
-        
+
         # =====================================================================
         # Per-BAR Crossbars and Handlers
         # =====================================================================
-        
+
         self.crossbars = {}
         self.bar_handlers = {}
-        
+
         # Create request sinks for dispatcher
         bar_req_sinks = {}
         # Create completion sources for arbiter
@@ -185,7 +190,7 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         bar_master_sources = {}
         # Create master completion sinks (for routing completions back)
         bar_master_sinks = {}
-        
+
         for bar_num in range(6):
             if bar_num in bar_handlers:
                 # Use custom handler for this BAR
@@ -234,58 +239,58 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
                 bar_cpl_sources[bar_num]    = stub.cpl_source
                 bar_master_sources[bar_num] = stub.req_source
                 bar_master_sinks[bar_num]   = stub.cpl_sink
-        
+
         # =====================================================================
         # Request Dispatcher (depacketizer -> BARs)
         # =====================================================================
-        
+
         self.bar_dispatcher = LitePCIeBARDispatcher(
             source     = self.depacketizer.req_source,
             bar_sinks  = bar_req_sinks,
             default_bar = 0,  # Route unknown to BAR0
         )
-        
+
         # =====================================================================
         # Completion Arbiter (BARs -> packetizer)
         # =====================================================================
-        
+
         self.cpl_arbiter = LitePCIeCompletionArbiter(
             bar_sources = bar_cpl_sources,
             sink        = self.packetizer.cmp_sink,
         )
-        
+
         # =====================================================================
         # Master Request Arbiter (BARs -> packetizer, for DMA/MSI)
         # =====================================================================
-        
+
         # Only include BARs that have real crossbars (might do DMA)
         active_master_sources = {
-            bar_num: src 
-            for bar_num, src in bar_master_sources.items() 
+            bar_num: src
+            for bar_num, src in bar_master_sources.items()
             if bar_num in self.crossbars
         }
-        
+
         self.master_arbiter = LitePCIeMasterArbiter(
             bar_sources = active_master_sources,
             sink        = self.packetizer.req_sink,
         )
-        
+
         # =====================================================================
         # Master Completion Routing (depacketizer -> BARs, for DMA completions)
         # =====================================================================
-        
+
         # Completions need to go to the right BAR based on channel.
         # Broadcast to all master sinks - each crossbar filters by channel internally.
         # Note: .connect() cannot be used multiple times, so use explicit signals.
-        
+
         active_master_sinks = {
             bar_num: sink
             for bar_num, sink in bar_master_sinks.items()
             if bar_num in self.crossbars
         }
-        
+
         cmp_source = self.depacketizer.cmp_source
-        
+
         for bar_num, sink in active_master_sinks.items():
             self.comb += [
                 sink.valid.eq(cmp_source.valid),
@@ -300,13 +305,13 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
                 sink.req_id.eq(cmp_source.req_id),
                 sink.cmp_id.eq(cmp_source.cmp_id),
             ]
-        
+
         # Ready when ANY sink accepts (crossbar handles channel filtering)
         if len(active_master_sinks) > 0:
             self.comb += cmp_source.ready.eq(
                 reduce(or_, [sink.ready for sink in active_master_sinks.values()])
             )
-        
+
         # =====================================================================
         # Convenience: expose BAR0 crossbar as 'crossbar' for compatibility
         # =====================================================================
@@ -329,16 +334,16 @@ class LitePCIeBAREndpoint(LiteXModule):
 
     Useful for attaching standard LitePCIe frontend components
     (like LitePCIeWishboneBridge) to a specific BAR's crossbar.
-    
+
     Parameters
     ----------
     crossbar : LitePCIeCrossbar
         The crossbar for this BAR.
-        
+
     phy : S7PCIEPHY
         PHY instance (for phy.id used in completions).
     """
-    
+
     def __init__(self, crossbar, phy):
         self.crossbar   = crossbar
         self.phy        = phy
