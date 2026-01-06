@@ -15,6 +15,7 @@ The exerciser allows test software to:
 * Validate interrupt delivery (MSI-X and legacy INTx)
 * Exercise Address Translation Services (ATS) and PASID functionality
 * Monitor incoming PCIe transactions
+* Inject PCIe errors (AER/DPC) and poisoned reads for validation
 
 Use Cases
 ---------

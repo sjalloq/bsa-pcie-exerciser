@@ -4,7 +4,7 @@ Multi-BAR Endpoint
 The ``LitePCIeMultiBAREndpoint`` extends standard LitePCIe functionality to
 support multiple BARs with independent routing based on the ``bar_hit`` field.
 
-Source: ``src/bsa_pcie_exerciser/core/multibar_endpoint.py``
+Source: ``src/bsa_pcie_exerciser/gateware/core/multibar_endpoint.py``
 
 Overview
 --------

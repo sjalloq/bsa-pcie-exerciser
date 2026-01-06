@@ -86,7 +86,7 @@ S7PCIEPHY TCL Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The Xilinx 7-Series PCIe IP requires additional configuration parameters.
-Current LitePCIe only configures BAR0:
+Upstream LitePCIe only configures BAR0:
 
 .. code-block:: python
 
@@ -97,7 +97,7 @@ Current LitePCIe only configures BAR0:
         ...
     }
 
-Required additions for BSA:
+Required additions for BSA (implemented in this repo):
 
 .. code-block:: python
 
@@ -126,6 +126,8 @@ checks is captured in ``docs/source/litepcie/pcie_7x_ip_properties.txt``.
 Regenerate it by running Vivado in batch mode and dumping ``list_property`` on
 ``pcie_7x``.
 
+.. code-block::text
+
         # BAR2 - MSI-X Table
         "Bar2_Enabled"      : True,
         "Bar2_Type"         : "Memory",
@@ -146,7 +148,7 @@ Regenerate it by running Vivado in batch mode and dumping ``list_property`` on
 
         # MSI-X Configuration
         "MSIx_Enabled"      : True,
-        "MSIx_Table_Size"   : "7FF",  # 2048 advertised (N-1 encoding)
+        "MSIx_Table_Size"   : "0F",   # 16 vectors advertised (N-1 encoding, hex)
         "MSIx_Table_Bar"    : 2,
         "MSIx_PBA_Bar"      : 5,
         "MSIx_Table_Offset" : "0",
@@ -181,22 +183,13 @@ The Xilinx 7-Series PCIe IP provides BAR hit information in the AXI-Stream
    * - tuser[8]
      - BAR6 hit (Expansion ROM)
 
-**Current State**: LitePCIe S7PCIEPHY does NOT extract BAR hit. It only uses
-SOF/EOF bits:
-
-.. code-block:: python
-
-    # s7pciephy.py:432-433
-    rx_is_sof = m_axis_rx_tuser[10:15]
-    rx_is_eof = m_axis_rx_tuser[17:22]
-
-**Required Addition**:
+**Implemented** in this repo’s fork of LitePCIe:
 
 .. code-block:: python
 
     # Add to S7PCIEPHY
-    self.bar_hit = Signal(7)
-    self.comb += self.bar_hit.eq(m_axis_rx_tuser[2:9])
+    self.bar_hit = Signal(6)
+    self.comb += self.bar_hit.eq(m_axis_rx_tuser[2:8])
 
 This signal must then be propagated through the PHY layout to the depacketizer
 for routing incoming TLPs to the appropriate handler.

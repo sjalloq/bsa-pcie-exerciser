@@ -143,3 +143,5 @@ Reader notes
   ``DMA_BUS_ADDR``/``ATS_ADDR`` offsets (see ``external/sysarch-acs/pal/*/pal_exerciser.c``).
 - For CSR definitions and bitfields, see ``docs/source/bsa/registers.rst`` and
   ``external/sysarch-acs/docs/pcie/Exerciser.md``.
+- Error injection and poison-mode controls are exposed via the DVSEC in the
+  user extended config space (see ``docs/source/implementation/config_space.rst``).

@@ -129,6 +129,40 @@ Default layout (DWORD addresses, base = ``0x6B`` / byte 0x1AC):
 The user ECAP chain is implemented in
 ``src/bsa_pcie_exerciser/gateware/config/pcie_config.py``.
 
+DVSEC Error Injection Control
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The DVSEC control DWORD (``0x76``) provides error injection and poison mode:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
+
+   * - Bits
+     - Name
+     - Description
+   * - 15:0
+     - DVSEC_ID
+     - Read-only, fixed to ``0x0001``.
+   * - 16
+     - INJECT_ON_DMA
+     - Inject error when DMA triggers (future use).
+   * - 17
+     - INJECT_NOW
+     - Write 1 to trigger an immediate error injection (self-clearing).
+   * - 18
+     - POISON_MODE
+     - Force BAR0/BAR1 reads to return all 1s and ignore writes.
+   * - 30:20
+     - ERROR_CODE
+     - Error code mapped to PCIe core ``cfg_err_*``.
+   * - 31
+     - FATAL
+     - Marks injected error as fatal for DPC status reporting.
+
+Error codes drive the PCIe core error inputs. The mapping is defined in
+``src/bsa_pcie_exerciser/gateware/soc/base.py``.
+
 USB Monitor Registers (Squirrel/CaptainDMA only):
 
 .. list-table::

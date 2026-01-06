@@ -116,6 +116,22 @@ Usage Example
 4. Software reads ``TXNDATA`` repeatedly until empty
 5. Software verifies ordering, size, and data payloads match expectations
 
+USB TLP Monitor (FT601)
+-----------------------
+
+In addition to the BAR0 ``TXN_TRACE`` monitor, the USB monitor subsystem
+captures full TLPs (RX and TX) and streams them over USB channel 1.
+
+Source: ``src/bsa_pcie_exerciser/gateware/usb/monitor/``
+
+Key points:
+
+* Captures both inbound and outbound traffic with full payloads.
+* Uses separate header/payload FIFOs and reports dropped/truncated counts.
+* Controlled via ``USB_MON_CTL`` and counters in BAR0.
+* Packet format is defined in ``bsa_pcie_exerciser.common.protocol`` and
+  summarized in :doc:`platforms/ft601`.
+
 Use Cases
 ---------
 

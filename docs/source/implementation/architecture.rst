@@ -2,7 +2,8 @@ Top-Level Architecture
 ======================
 
 The BSA Exerciser is implemented as a LiteX SoC (``BSAExerciserSoC``) that
-integrates a PCIe endpoint with DMA, interrupt, and ATS subsystems.
+integrates a PCIe endpoint with DMA, interrupt, ATS, and a user-defined
+extended config-space responder for ACS-required capabilities.
 
 SoC Block Diagram
 -----------------
@@ -53,6 +54,10 @@ SoC Block Diagram
     │                                                                   │
     │   ┌─────────────────────┐                                         │
     │   │ Transaction Monitor │                                         │
+    │   └─────────────────────┘                                         │
+    │                                                                   │
+    │   ┌─────────────────────┐                                         │
+    │   │ USB TLP Monitor     │                                         │
     │   └─────────────────────┘                                         │
     │                                                                   │
     │   ┌─────────────────────┐                                         │
@@ -110,6 +115,7 @@ RX Path (Host → Exerciser)
    * BAR1: DMA buffer handler performs memory read/write
    * BAR2/5: MSI-X table/PBA access (lower entries only)
    * Transaction monitor taps the request stream for logging
+   * USB monitor taps RX/TX streams for streaming capture (if enabled)
 
 5. Completion arbiter collects responses from all BARs
 6. Packetizer formats completion TLP
@@ -136,3 +142,4 @@ See the following sections for detailed documentation:
 * :doc:`ats` - ATS engine, ATC, and invalidation
 * :doc:`pasid` - PASID prefix injection
 * :doc:`monitor` - Transaction monitoring
+* Config-space responder (ATS/PASID/ACS/DPC ECAPs + DVSEC error injection)

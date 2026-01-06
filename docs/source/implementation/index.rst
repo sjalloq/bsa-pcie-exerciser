@@ -22,3 +22,4 @@ The implementation is built on:
    ats
    pasid
    monitor
+   config_space

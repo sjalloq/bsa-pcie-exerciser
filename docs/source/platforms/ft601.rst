@@ -363,29 +363,55 @@ on RX and routes to the appropriate channel via ``USBCrossbar``.
 BSA Monitoring Protocol
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-.. admonition:: REVISIT
-
-   This references ``docs/specs/usb_monitoring_design.md`` which is
-   a temporary markdown doc. Migrate to Sphinx when the monitoring subsystem
-   is implemented.
-
-For PCIe transaction monitoring, we define a richer packet format:
+PCIe transaction monitoring uses the same USB framing (preamble, channel,
+length), with channel 1 carrying a TLP record:
 
 ::
 
+    USB Frame (pcie_screamer)
     Offset  Size  Field
     ------  ----  -----------
-    0x00    4     Magic (0x50434945 = "PCIE")
-    0x04    4     Sequence number
-    0x08    8     Timestamp (64-bit, ns resolution)
-    0x10    2     Packet type
-    0x12    2     Flags (direction, attributes, BAR hit)
-    0x14    2     Payload length
-    0x16    2     Reserved
-    0x18    8     Reserved (pad to 32 bytes)
-    0x20    N     Payload (TLP data, up to 224 bytes)
+    0x00    4     Preamble (0x5aa55aa5)
+    0x04    4     Destination (channel ID, 1 = monitor)
+    0x08    4     Length (bytes)
+    0x0C    N     Payload (TLP record)
 
-All packets are 32-byte aligned for efficient USB transfer.
+TLP record payload (32-byte header + data):
+
+::
+
+    Word 0 (64-bit)
+      [9:0]   payload_length (DW count)
+      [13:10] tlp_type
+      [14]    direction (0=RX, 1=TX)
+      [15]    truncated (1 if payload truncated)
+      [31:16] header_word_count (always 4)
+      [63:32] timestamp[31:0]
+
+    Word 1 (64-bit)
+      [31:0]  timestamp[63:32]
+      [47:32] req_id
+      [55:48] tag
+      [59:56] first_be
+      [63:60] last_be
+
+    Word 2 (64-bit)
+      [63:0]  address
+
+    Word 3 (64-bit)
+      [0]     we
+      [3:1]   bar_hit (RX) / reserved (TX)
+      [5:4]   attr
+      [7:6]   at
+      [8]     pasid_valid (TX)
+      [28:9]  pasid (TX)
+      [29]    privileged (TX) / status[0] (Cpl)
+      [30]    execute (TX) / status[1] (Cpl)
+      [31]    status[2] (Cpl)
+      [47:32] cmp_id (Cpl)
+      [59:48] byte_count (Cpl)
+
+Payload data follows as ``payload_length`` DWORDs (4 bytes each).
 
 Host Software Interface
 -----------------------
@@ -460,60 +486,11 @@ Decoding BSA Monitor Packets
 
 .. code-block:: python
 
-    import struct
-    from dataclasses import dataclass
-    from enum import IntEnum
-
-    class PacketType(IntEnum):
-        TXN_INBOUND_REQ  = 0x0001
-        TXN_OUTBOUND_REQ = 0x0003
-        TXN_MSI          = 0x0005
-        CTRL_OVERFLOW    = 0x0100
-
-    @dataclass
-    class MonitorPacket:
-        seq_num: int
-        timestamp_ns: int
-        pkt_type: PacketType
-        flags: int
-        payload: bytes
-
-        @property
-        def is_write(self):
-            return bool(self.flags & 0x01)
-
-        @property
-        def bar_hit(self):
-            return (self.flags >> 8) & 0x07
-
-    MAGIC = 0x50434945  # "PCIE"
+    from bsa_pcie_exerciser.common.protocol import parse_stream
 
     def decode_monitor_packets(data: bytes):
-        """Decode BSA monitor format packets."""
-        offset = 0
-        while offset + 32 <= len(data):
-            # Parse 32-byte header
-            magic, seq, ts, ptype, flags, length, _, _ = struct.unpack_from(
-                '<IIQHHHHQ', data, offset
-            )
-
-            if magic != MAGIC:
-                offset += 32  # Skip to next aligned position
-                continue
-
-            # Extract payload
-            payload = data[offset + 32 : offset + 32 + length]
-
-            yield MonitorPacket(
-                seq_num=seq,
-                timestamp_ns=ts,
-                pkt_type=PacketType(ptype),
-                flags=flags,
-                payload=payload
-            )
-
-            # Advance to next 32-byte aligned packet
-            offset += 32 + ((length + 31) & ~31)
+        """Decode USB monitor stream into TLPPacket objects."""
+        return parse_stream(data)
 
 Live Capture Example
 ^^^^^^^^^^^^^^^^^^^^
@@ -549,19 +526,15 @@ Live Capture Example
                 n = dev.readPipe(0x82, buf, len(buf))
                 if n > 0:
                     for pkt in decode_monitor_packets(buf[:n]):
-                        # Parse address from payload
-                        if len(pkt.payload) >= 8:
-                            addr = struct.unpack_from('<Q', pkt.payload, 0)[0]
-                        else:
-                            addr = 0
+                        addr = pkt.address
 
                         table.add_row(
-                            f"{pkt.timestamp_ns / 1e6:.3f}",
-                            "OUT" if pkt.pkt_type == PacketType.TXN_OUTBOUND_REQ else "IN",
+                            f"{pkt.timestamp_us / 1000:.3f}",
+                            "OUT" if pkt.direction_str == "->" else "IN",
                             "WR" if pkt.is_write else "RD",
                             str(pkt.bar_hit),
                             f"0x{addr:08X}",
-                            str(len(pkt.payload))
+                            str(pkt.payload_length * 4)
                         )
 
                         # Limit table size

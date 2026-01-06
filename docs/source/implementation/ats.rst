@@ -7,12 +7,12 @@ The Address Translation Services implementation consists of:
 * **ATC**: Address Translation Cache for storing translations
 * **ATSInvalidationHandler**: Handles invalidation requests from IOMMU
 
-Source: ``src/bsa_pcie_exerciser/ats/``
+Source: ``src/bsa_pcie_exerciser/gateware/ats/``
 
 ATS Engine
 ----------
 
-Source: ``src/bsa_pcie_exerciser/ats/engine.py``
+Source: ``src/bsa_pcie_exerciser/gateware/ats/engine.py``
 
 The ``ATSEngine`` issues ATS Translation Request TLPs and parses completions.
 
@@ -20,10 +20,11 @@ Operation
 ~~~~~~~~~
 
 1. Software triggers translation request via ``ATSCTL``
-2. Engine issues Translation Request TLP
-3. Engine receives Translation Completion
-4. Engine extracts translated address, permissions, range
-5. Results written to status registers and optionally to ATC
+2. ATS ECAP control ``ATS_ENABLE`` must be set (bit 31) to allow requests
+3. Engine issues Translation Request TLP
+4. Engine receives Translation Completion
+5. Engine extracts translated address, permissions, range
+6. Results written to status registers and optionally to ATC
 
 Control Interface
 ~~~~~~~~~~~~~~~~~
@@ -51,7 +52,7 @@ Status Interface
 Address Translation Cache (ATC)
 -------------------------------
 
-Source: ``src/bsa_pcie_exerciser/ats/atc.py``
+Source: ``src/bsa_pcie_exerciser/gateware/ats/atc.py``
 
 The ``ATC`` caches a single translation entry. This simplified design is
 sufficient for BSA compliance testing.
@@ -109,7 +110,7 @@ The ATS engine stores translations after successful requests:
 ATS Invalidation Handler
 ------------------------
 
-Source: ``src/bsa_pcie_exerciser/ats/invalidation.py``
+Source: ``src/bsa_pcie_exerciser/gateware/ats/invalidation.py``
 
 The ``ATSInvalidationHandler`` processes ATS Invalidation Requests from
 the host IOMMU and sends Invalidation Completion responses.
