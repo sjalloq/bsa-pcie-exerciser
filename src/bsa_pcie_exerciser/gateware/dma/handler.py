@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - DMA Buffer Handler (BAR1)
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # BAR1 handler providing PCIe-accessible DMA buffer storage.
@@ -47,6 +47,8 @@ class BSADMABufferHandler(LiteXModule):
 
         self.phy = phy
         self.data_width = data_width
+        self.poison_mode = Signal()
+        self.poison_event = Signal()
 
         # =====================================================================
         # PCIe Slave Interface (from BAR dispatcher)
@@ -76,6 +78,7 @@ class BSADMABufferHandler(LiteXModule):
         req_tag    = Signal(8)
         req_req_id = Signal(16)
         req_we     = Signal()
+        poisoned_read = Signal()
 
         # Memory addressing: byte address to QWORD index
         # Byte address [14:3] gives QWORD index (bits 0-2 are byte offset within QWORD)
@@ -113,10 +116,13 @@ class BSADMABufferHandler(LiteXModule):
                 NextValue(req_req_id, req_sink.req_id),
                 NextValue(req_we, req_sink.we),
                 NextValue(qword_idx, req_sink.adr[3:3+addr_width]),  # QWORD index
+                NextValue(poisoned_read, ~req_sink.we & self.poison_mode),
 
                 If(req_sink.we,
                     # Write request - perform write on this beat
-                    buffer.b_we.eq(write_be),
+                    If(~self.poison_mode,
+                        buffer.b_we.eq(write_be),
+                    ),
                     NextState("WRITE"),
                 ).Else(
                     # Read request - start memory read
@@ -135,7 +141,9 @@ class BSADMABufferHandler(LiteXModule):
 
             If(req_sink.valid,
                 # Perform write
-                buffer.b_we.eq(write_be),
+                If(~self.poison_mode,
+                    buffer.b_we.eq(write_be),
+                ),
                 # Update QWORD index for multi-beat writes
                 NextValue(qword_idx, qword_idx + 1),
 
@@ -204,6 +212,7 @@ class BSADMABufferHandler(LiteXModule):
                 cpl_data.eq(read_data),
             ),
         ]
+        self.comb += If(poisoned_read, cpl_data.eq(2**64 - 1))
 
         fsm.act("COMPLETE",
             buffer.b_we.eq(0),  # No write during completion
@@ -223,3 +232,12 @@ class BSADMABufferHandler(LiteXModule):
                 NextState("IDLE"),
             ),
         )
+
+        # Poison event pulse on BAR1 reads.
+        self.sync += [
+            self.poison_event.eq(0),
+            If(fsm.ongoing("IDLE") & req_sink.valid & req_sink.first &
+               ~req_sink.we & self.poison_mode & req_sink.ready,
+                self.poison_event.eq(1),
+            ),
+        ]

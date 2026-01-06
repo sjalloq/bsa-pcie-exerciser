@@ -118,6 +118,14 @@ Required additions for BSA:
         "Bar1_64bit"        : False,
         "Bar1_Prefetchable" : False,
 
+PCIe 7-Series IP Properties
+----------------------------
+
+The Vivado PCIe 7-series IP configuration property list used for capability
+checks is captured in ``docs/source/litepcie/pcie_7x_ip_properties.txt``.
+Regenerate it by running Vivado in batch mode and dumping ``list_property`` on
+``pcie_7x``.
+
         # BAR2 - MSI-X Table
         "Bar2_Enabled"      : True,
         "Bar2_Type"         : "Memory",

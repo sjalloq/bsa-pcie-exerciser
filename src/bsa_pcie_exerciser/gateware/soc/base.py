@@ -2,7 +2,7 @@
 #
 # BSA PCIe Exerciser - Base SoC
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Uses modified LitePCIe fork with bar_hit extraction and attr passthrough.
@@ -41,6 +41,7 @@ from bsa_pcie_exerciser.gateware.msix import (
     LitePCIeMSIXController,
 )
 
+from bsa_pcie_exerciser.gateware.config import BSAConfigSpace, USER_EXT_CFG_DWORD_BASE
 from bsa_pcie_exerciser.gateware.pasid import PASIDPrefixInjector
 from bsa_pcie_exerciser.gateware.ats import ATSEngine, ATC, ATSInvalidationHandler
 
@@ -152,6 +153,17 @@ class BSAExerciserSoC(SoCMini):
                 # Legacy Interrupts
                 "Legacy_Interrupt": "INTA",
                 "IntX_Generation" : True,
+
+                # AER Capability (required for ACS error-injection tests)
+                "AER_Enabled"                  : True,
+                "AER_ECRC_Check_Capable"       : False,
+                "AER_ECRC_Gen_Capable"         : False,
+                "AER_Multiheader"              : False,
+                "AER_Permit_Root_Error_Update" : False,
+
+                # User-defined extended configuration space (ACS capabilities/DVSEC)
+                "EXT_PCI_CFG_Space"            : True,
+                "EXT_PCI_CFG_Space_Addr"       : f"{USER_EXT_CFG_DWORD_BASE:X}",
             })
 
             # LTSSM Tracer for link debugging
@@ -257,6 +269,9 @@ class BSAExerciserSoC(SoCMini):
         )
         self.bus.add_master("pcie", master=self.pcie_bridge.wishbone)
 
+        # User-defined extended config space responder ---------------------------
+        self.config_space = BSAConfigSpace(self.pcie_endpoint, self.pcie_phy)
+
 
         # DMA Engine --------------------------------------------------------------
         self.dma_engine = BSADMAEngine(
@@ -283,6 +298,12 @@ class BSAExerciserSoC(SoCMini):
             # Requester ID override (for ACS testing - BSA e001)
             self.dma_engine.rid_override_valid.eq(self.bsa_regs.rid_override_valid),
             self.dma_engine.rid_override_value.eq(self.bsa_regs.rid_override_value),
+        ]
+
+        # Poison mode handling (BAR0/BAR1).
+        self.comb += [
+            self.bsa_regs.poison_mode.eq(self.config_space.poison_mode),
+            self.dma_handler.poison_mode.eq(self.config_space.poison_mode),
         ]
 
         # Connect DMA engine status signals to BSA registers
@@ -316,6 +337,73 @@ class BSAExerciserSoC(SoCMini):
             self.bsa_regs.msi_busy.eq(~self.msix_controller.fsm.ongoing("IDLE")),
         ]
 
+        # Error injection to PCIe core ------------------------------------------------
+        poison_event = Signal()
+        inject_pulse = Signal()
+        err_code     = Signal(11)
+
+        self.comb += [
+            poison_event.eq(self.bsa_regs.poison_event | self.dma_handler.poison_event),
+            inject_pulse.eq(self.config_space.inject_error_pulse | poison_event),
+            err_code.eq(Mux(poison_event, 0x0A, self.config_space.error_code)),
+        ]
+
+        # Default all error inputs to 0.
+        self.comb += [
+            self.pcie_phy.cfg_err_ecrc.eq(0),
+            self.pcie_phy.cfg_err_ur.eq(0),
+            self.pcie_phy.cfg_err_cpl_timeout.eq(0),
+            self.pcie_phy.cfg_err_cpl_unexpect.eq(0),
+            self.pcie_phy.cfg_err_cpl_abort.eq(0),
+            self.pcie_phy.cfg_err_posted.eq(0),
+            self.pcie_phy.cfg_err_cor.eq(0),
+            self.pcie_phy.cfg_err_atomic_egress_blocked.eq(0),
+            self.pcie_phy.cfg_err_internal_cor.eq(0),
+            self.pcie_phy.cfg_err_malformed.eq(0),
+            self.pcie_phy.cfg_err_mc_blocked.eq(0),
+            self.pcie_phy.cfg_err_poisoned.eq(0),
+            self.pcie_phy.cfg_err_norecovery.eq(0),
+            self.pcie_phy.cfg_err_tlp_cpl_header.eq(0),
+            self.pcie_phy.cfg_err_locked.eq(0),
+            self.pcie_phy.cfg_err_acs.eq(0),
+            self.pcie_phy.cfg_err_internal_uncor.eq(0),
+            self.pcie_phy.cfg_err_aer_headerlog.eq(0),
+        ]
+
+        # Drive error reporting pulses on inject_pulse.
+        self.comb += If(inject_pulse,
+            Case(err_code, {
+                # Correctable errors.
+                0x0: self.pcie_phy.cfg_err_cor.eq(1),
+                0x1: self.pcie_phy.cfg_err_cor.eq(1),
+                0x2: self.pcie_phy.cfg_err_cor.eq(1),
+                0x3: self.pcie_phy.cfg_err_cor.eq(1),
+                0x4: self.pcie_phy.cfg_err_cor.eq(1),
+                0x5: self.pcie_phy.cfg_err_cor.eq(1),
+                0x6: self.pcie_phy.cfg_err_internal_cor.eq(1),
+                0x7: self.pcie_phy.cfg_err_cor.eq(1),
+                # Uncorrectable errors.
+                0x8: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                0x9: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                0xA: self.pcie_phy.cfg_err_poisoned.eq(1),
+                0xB: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                0xC: self.pcie_phy.cfg_err_cpl_timeout.eq(1),
+                0xD: self.pcie_phy.cfg_err_cpl_abort.eq(1),
+                0xE: self.pcie_phy.cfg_err_cpl_unexpect.eq(1),
+                0xF: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                0x10: self.pcie_phy.cfg_err_malformed.eq(1),
+                0x11: self.pcie_phy.cfg_err_ecrc.eq(1),
+                0x12: self.pcie_phy.cfg_err_ur.eq(1),
+                0x13: self.pcie_phy.cfg_err_acs.eq(1),
+                0x14: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                0x15: self.pcie_phy.cfg_err_mc_blocked.eq(1),
+                0x16: self.pcie_phy.cfg_err_atomic_egress_blocked.eq(1),
+                0x17: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                0x18: self.pcie_phy.cfg_err_internal_uncor.eq(1),
+                "default": self.pcie_phy.cfg_err_internal_uncor.eq(1),
+            }),
+        )
+
         # ATS Engine and ATC --------------------------------------------------------
         self.atc = ATC()
         # Get master port first to obtain channel for completion routing
@@ -333,7 +421,7 @@ class BSAExerciserSoC(SoCMini):
 
         # Connect ATS engine control signals from BSA registers
         self.comb += [
-            self.ats_engine.trigger.eq(self.bsa_regs.ats_trigger),
+            self.ats_engine.trigger.eq(self.bsa_regs.ats_trigger & self.config_space.ats_enable),
             self.ats_engine.address.eq(self.bsa_regs.dma_bus_addr),  # Shared address register
             self.ats_engine.pasid_en.eq(self.bsa_regs.ats_pasid_en),
             self.ats_engine.pasid_val.eq(self.bsa_regs.pasid_val[:20]),
@@ -341,6 +429,17 @@ class BSAExerciserSoC(SoCMini):
             self.ats_engine.no_write.eq(self.bsa_regs.ats_no_write),
             self.ats_engine.exec_req.eq(self.bsa_regs.ats_exec_req),
             self.ats_engine.clear_atc.eq(self.bsa_regs.ats_clear_atc),
+        ]
+
+        # Clear ATC and ATS results when ATS is disabled.
+        ats_enable_prev = Signal()
+        self.sync += [
+            ats_enable_prev.eq(self.config_space.ats_enable),
+        ]
+        ats_disable_pulse = Signal()
+        self.comb += ats_disable_pulse.eq(ats_enable_prev & ~self.config_space.ats_enable)
+        self.comb += [
+            self.bsa_regs.ats_clear_results.eq(ats_disable_pulse),
         ]
 
         # Connect ATS engine status signals to BSA registers
@@ -383,7 +482,7 @@ class BSAExerciserSoC(SoCMini):
             # Connect ATC lookup results to DMA engine
             self.dma_engine.atc_hit.eq(self.atc.lookup_hit),
             self.dma_engine.atc_output_addr.eq(self.atc.lookup_output),
-            self.dma_engine.use_atc.eq(self.bsa_regs.dma_use_atc),
+            self.dma_engine.use_atc.eq(self.bsa_regs.dma_use_atc & self.config_space.ats_enable),
         ]
 
         # Connect ATS engine to master port for TLP requests
@@ -419,7 +518,7 @@ class BSAExerciserSoC(SoCMini):
 
         # ATC invalidation can come from software (clear_atc) or invalidation handler
         self.comb += self.atc.invalidate.eq(
-            self.bsa_regs.ats_clear_atc | self.ats_invalidation.atc_invalidate
+            self.bsa_regs.ats_clear_atc | ats_disable_pulse | self.ats_invalidation.atc_invalidate
         )
 
         # Update invalidated status from both sources
@@ -464,7 +563,6 @@ class BSAExerciserSoC(SoCMini):
         # Tap configuration requests for TXN_TRACE
         conf_source = self.pcie_endpoint.conf_source
         self.comb += [
-            conf_source.ready.eq(1),
             self.txn_monitor.tap_cfg_valid.eq(conf_source.valid & conf_source.ready),
             self.txn_monitor.tap_cfg_first.eq(conf_source.first),
             self.txn_monitor.tap_cfg_last.eq(conf_source.last),

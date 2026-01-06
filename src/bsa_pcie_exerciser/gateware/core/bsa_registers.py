@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - BAR0 Register Module
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Implements the ARM BSA Exerciser BAR0 register map per:
@@ -126,6 +126,7 @@ class BSARegisters(LiteXModule):
         self.ats_pasid_en   = Signal()       # Include PASID in ATS request
         self.ats_exec_req   = Signal()       # Execute permission requested
         self.ats_clear_atc  = Signal()       # Clear ATC (write-1-to-clear)
+        self.ats_clear_results = Signal()    # Clear ATS result registers (pulse)
 
         # ATS interface (status inputs from ATS engine)
         self.ats_in_flight   = Signal()      # ATS request in progress
@@ -152,6 +153,10 @@ class BSARegisters(LiteXModule):
         self.txn_fifo_data  = Signal(32)
         self.txn_fifo_valid = Signal()
         self.txn_fifo_read  = Signal()
+
+        # Poison mode interface
+        self.poison_mode  = Signal()        # Input: force BAR reads to all 1s, ignore writes
+        self.poison_event = Signal()        # Output: poison-mode read detected (pulse)
 
         # USB Monitor interface (Squirrel/CaptainDMA only)
         self.usb_mon_ctrl         = Signal(32, reset=3)  # R/W control register
@@ -219,6 +224,7 @@ class BSARegisters(LiteXModule):
                 "default":          read_data.eq(0),
             }),
         ]
+        self.comb += If(self.poison_mode, read_data.eq(0xFFFFFFFF))
 
         # =====================================================================
         # Wishbone Bus Logic
@@ -230,23 +236,33 @@ class BSARegisters(LiteXModule):
                 self.bus.ack.eq(1),
                 self.bus.dat_r.eq(read_data),
                 If(self.bus.we,
-                    Case(reg_addr, {
-                        REG_MSICTL:         self.msictl.eq(self.bus.dat_w),
-                        REG_INTXCTL:        self.intxctl.eq(self.bus.dat_w),
-                        REG_DMACTL:         self.dmactl.eq(self.bus.dat_w),
-                        REG_DMA_OFFSET:     self.dma_offset.eq(self.bus.dat_w),
-                        REG_DMA_BUS_ADDR_LO: self.dma_bus_addr_lo.eq(self.bus.dat_w),
-                        REG_DMA_BUS_ADDR_HI: self.dma_bus_addr_hi.eq(self.bus.dat_w),
-                        REG_DMA_LEN:        self.dma_len.eq(self.bus.dat_w),
-                        REG_DMASTATUS:      self.dmastatus.eq(self.bus.dat_w),
-                        REG_PASID_VAL:      self.pasid_val.eq(self.bus.dat_w),
-                        REG_ATSCTL:         self.atsctl.eq(self.bus.dat_w),
-                        REG_RID_CTL:        self.rid_ctl.eq(self.bus.dat_w),
-                        REG_TXN_CTRL:       self.txn_ctrl.eq(self.bus.dat_w),
-                        REG_USB_MON_CTRL:   self.usb_mon_ctrl.eq(self.bus.dat_w),
-                        # Read-only registers ignore writes
-                    }),
+                    If(~self.poison_mode,
+                        Case(reg_addr, {
+                            REG_MSICTL:         self.msictl.eq(self.bus.dat_w),
+                            REG_INTXCTL:        self.intxctl.eq(self.bus.dat_w),
+                            REG_DMACTL:         self.dmactl.eq(self.bus.dat_w),
+                            REG_DMA_OFFSET:     self.dma_offset.eq(self.bus.dat_w),
+                            REG_DMA_BUS_ADDR_LO: self.dma_bus_addr_lo.eq(self.bus.dat_w),
+                            REG_DMA_BUS_ADDR_HI: self.dma_bus_addr_hi.eq(self.bus.dat_w),
+                            REG_DMA_LEN:        self.dma_len.eq(self.bus.dat_w),
+                            REG_DMASTATUS:      self.dmastatus.eq(self.bus.dat_w),
+                            REG_PASID_VAL:      self.pasid_val.eq(self.bus.dat_w),
+                            REG_ATSCTL:         self.atsctl.eq(self.bus.dat_w),
+                            REG_RID_CTL:        self.rid_ctl.eq(self.bus.dat_w),
+                            REG_TXN_CTRL:       self.txn_ctrl.eq(self.bus.dat_w),
+                            REG_USB_MON_CTRL:   self.usb_mon_ctrl.eq(self.bus.dat_w),
+                            # Read-only registers ignore writes
+                        }),
+                    ),
                 ),
+            ),
+        ]
+
+        # Poison event pulse on BAR0 reads.
+        self.sync += [
+            self.poison_event.eq(0),
+            If(self.poison_mode & self.bus.cyc & self.bus.stb & ~self.bus.we & ~self.bus.ack,
+                self.poison_event.eq(1),
             ),
         ]
 
@@ -345,8 +361,13 @@ class BSARegisters(LiteXModule):
         # Update ATSCTL read-only status bits from ATS engine
         self.sync += [
             self.atsctl[6].eq(self.ats_in_flight),
-            self.atsctl[7].eq(self.ats_success),
-            self.atsctl[8].eq(self.ats_cacheable),
+            If(self.ats_clear_results,
+                self.atsctl[7].eq(0),
+                self.atsctl[8].eq(0),
+            ).Else(
+                self.atsctl[7].eq(self.ats_success),
+                self.atsctl[8].eq(self.ats_cacheable),
+            ),
         ]
 
         # Invalidated bit (9) is sticky: set on pulse, cleared by writing 1 to bit 9
@@ -363,7 +384,12 @@ class BSARegisters(LiteXModule):
 
         # ATS result registers update from ATS engine
         self.sync += [
-            If(self.ats_addr_lo_we,
+            If(self.ats_clear_results,
+                self.ats_addr_lo.eq(0),
+                self.ats_addr_hi.eq(0),
+                self.ats_range_size.eq(0),
+                self.ats_perm.eq(0),
+            ).Elif(self.ats_addr_lo_we,
                 self.ats_addr_lo.eq(self.ats_addr_lo_in),
                 self.ats_addr_hi.eq(self.ats_addr_hi_in),
                 self.ats_range_size.eq(self.ats_range_size_in),

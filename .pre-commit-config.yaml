@@ -19,3 +19,16 @@ repos:
         entry: ./hooks/gtkw.py
         language: python
         files: '.*\.gtkw$'
+
+      - id: check-copyright
+        name: Check copyright headers
+        entry: ./hooks/check_copyright.py
+        language: python
+        types: [python]
+        exclude: |
+          (?x)^(
+            docs/source/conf\.py|
+            src/bsa_pcie_exerciser/gateware/usb/core\.py|
+            src/bsa_pcie_exerciser/gateware/usb/ft601\.py|
+            external/.*
+          )$

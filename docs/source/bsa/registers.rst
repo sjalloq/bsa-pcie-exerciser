@@ -95,6 +95,40 @@ Register Summary
      - RO
      - Exerciser identification
 
+User Extended Config Space (ECAPs)
+----------------------------------
+
+The PCIe core forwards configuration requests at or above
+``EXT_PCI_CFG_Space_Addr`` (DWORD address) to user logic. The exerciser uses
+this region to advertise ATS/PASID/ACS/DPC ECAPs plus a DVSEC for error
+injection. The ECAP offsets are design-defined; software follows the ECAP
+linked list via the Next Pointer fields rather than assuming fixed addresses.
+
+Default layout (DWORD addresses, base = ``0x6B`` / byte 0x1AC):
+
+.. code-block:: text
+
+   Core ECAPs (fixed by PCIe IP)
+     ... -> last_core_ecap -> next = 0x6B
+
+   User ECAP chain (BSA exerciser)
+     0x6B: ATS  ECAP header
+     0x6C: ATS  control
+     0x6D: PASID ECAP header
+     0x6E: PASID capability/control
+     0x6F: ACS  ECAP header
+     0x70: ACS  control
+     0x71: DPC  ECAP header
+     0x72: DPC  control
+     0x73: DPC  status
+     0x74: DVSEC header
+     0x75: DVSEC header 1
+     0x76: DVSEC control (error injection / poison)
+     0x77: Next = 0 (end of list)
+
+The user ECAP chain is implemented in
+``src/bsa_pcie_exerciser/gateware/config/pcie_config.py``.
+
 USB Monitor Registers (Squirrel/CaptainDMA only):
 
 .. list-table::

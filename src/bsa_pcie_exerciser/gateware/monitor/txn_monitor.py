@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - Transaction Monitor
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Captures inbound PCIe transactions for BSA TXN_TRACE FIFO.
@@ -94,7 +94,7 @@ class TransactionMonitor(LiteXModule):
         self.tap_cfg_bus_number  = Signal(8)
         self.tap_cfg_device_no   = Signal(5)
         self.tap_cfg_func        = Signal(3)
-        self.tap_cfg_ext_reg     = Signal(3)
+        self.tap_cfg_ext_reg     = Signal(4)
         self.tap_cfg_register_no = Signal(6)
         self.tap_cfg_tag         = Signal(8)
         self.tap_cfg_first_be    = Signal(4)
@@ -189,7 +189,7 @@ class TransactionMonitor(LiteXModule):
             (self.tap_cfg_bus_number << 20) |
             (self.tap_cfg_device_no  << 15) |
             (self.tap_cfg_func       << 12) |
-            (self.tap_cfg_ext_reg    << 9)  |
+            (self.tap_cfg_ext_reg    << 8)  |
             (self.tap_cfg_register_no << 2)
         )
 
