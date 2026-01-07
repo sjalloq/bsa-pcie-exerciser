@@ -50,6 +50,20 @@ The following block diagram shows the main functional blocks that make up the BS
 - **ATS Cache** — Address Translation Services with translation request/completion handling
 - **Transaction Monitor** — Capture inbound TLPs and stream via USB 3.0 for host-side analysis
 
+## S7 PHY Limitations
+
+The Xilinx 7‑series hard PCIe core only exposes a subset of AER/DPC controls to
+user logic. This limits how precisely the exerciser can emulate certain error
+conditions required by ACS.
+
+Affected ACS tests (see `docs/source/bsa/testcases.rst` for details):
+
+- e023 (AER functionality for RPs)
+- e024 (DPC functionality for RPs)
+- e027 (DPC trigger when RP‑PIO unimplemented)
+- e028 (RAS error record for poisoned data)
+- e029 (RAS error record for external abort)
+
 ## Supported Hardware
 
 | Board | FPGA | PCIe | USB Monitor | Status |
@@ -152,7 +166,7 @@ This streams all inbound TLPs with full header details (address, attributes, byt
 Full documentation is available in the [docs/](docs/) directory:
 
 - [Architecture Overview](docs/source/architecture.rst)
-- [Register Map](docs/source/registers.rst)  
+- [Register Map](docs/source/registers.rst)
 - [Building from Source](docs/source/building.rst)
 - [USB Monitor Protocol](docs/source/usb_monitor.rst)
 

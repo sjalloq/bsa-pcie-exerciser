@@ -98,9 +98,13 @@ Testcase matrix
    * - e023
      - AER functionality for RPs (error injection)
      - ``ERR_INJ``, ``CFG``
+       (Note: 7-series PCIe core exposes only a subset of AER error inputs;
+       some error codes cannot assert the specific AER status bit expected by ACS.)
    * - e024
      - DPC functionality for RPs (error injection)
      - ``ERR_INJ``, ``CFG``
+       (Note: config-read containment checks rely on root-port behavior; the
+       exerciser cannot force UR responses for core-owned config space.)
    * - e025
      - 2/4/8-byte targeted writes (DMA + transaction monitor)
      - ``DMA``, ``TXN_MON``, ``BAR_MMIO``
@@ -113,12 +117,18 @@ Testcase matrix
    * - e027
      - DPC trigger when RP-PIO unimplemented (error injection)
      - ``ERR_INJ``, ``CFG``
+       (Note: config-read containment checks rely on root-port behavior; the
+       exerciser cannot force UR responses for core-owned config space.)
    * - e028
      - RAS error record for poisoned data
      - ``POISON``, ``BAR_MMIO``
+       (Note: poison mode forces BAR reads to all 1s; RAS error logging depends
+       on platform support.)
    * - e029
      - RAS error record for external abort
      - ``BAR_MMIO``
+       (Note: external abort behavior is platform-dependent; exerciser does not
+       synthesize aborts beyond BAR decode/control.)
    * - e030
      - Enable/disable STE.DCP bit (SMMU translation behavior with DMA)
      - ``DMA``, ``BAR_MMIO``
@@ -145,3 +155,13 @@ Reader notes
   ``external/sysarch-acs/docs/pcie/Exerciser.md``.
 - Error injection and poison-mode controls are exposed via the DVSEC in the
   user extended config space (see ``docs/source/implementation/config_space.rst``).
+
+Implementation limitations
+--------------------------
+
+- The 7-series PCIe hard IP exposes a limited set of ``cfg_err_*`` inputs.
+  Some ACS error codes do not map to a dedicated input, so the corresponding
+  AER status bit may not be set on the endpoint.
+ - DPC containment behavior (config reads returning ``PCIE_UNKNOWN_RESPONSE``)
+  is driven by upstream root-port behavior; the exerciser cannot override
+  core-owned config responses after error injection.

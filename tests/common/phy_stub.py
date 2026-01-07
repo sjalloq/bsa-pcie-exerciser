@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - PHY Stub for Simulation
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
@@ -43,6 +43,26 @@ class PHYStub(LiteXModule):
         self.bar0_mask        = get_bar_mask(0x1000)  # 0xFFFFF000 - upper bits to mask off
         self.max_request_size = Signal(16, reset=512)
         self.max_payload_size = Signal(16, reset=256)
+
+        # Error reporting signals (directly settable, mimics S7PCIEPHY interface)
+        self.cfg_err_ecrc                  = Signal()
+        self.cfg_err_ur                    = Signal()
+        self.cfg_err_cpl_timeout           = Signal()
+        self.cfg_err_cpl_unexpect          = Signal()
+        self.cfg_err_cpl_abort             = Signal()
+        self.cfg_err_posted                = Signal()
+        self.cfg_err_cor                   = Signal()
+        self.cfg_err_atomic_egress_blocked = Signal()
+        self.cfg_err_internal_cor          = Signal()
+        self.cfg_err_malformed             = Signal()
+        self.cfg_err_mc_blocked            = Signal()
+        self.cfg_err_poisoned              = Signal()
+        self.cfg_err_norecovery            = Signal()
+        self.cfg_err_tlp_cpl_header        = Signal(48)
+        self.cfg_err_locked                = Signal()
+        self.cfg_err_acs                   = Signal()
+        self.cfg_err_internal_uncor        = Signal()
+        self.cfg_err_aer_headerlog         = Signal(128)
 
         # Clock domain stub
         self.cd_pcie = ClockDomain("pcie", reset_less=True)

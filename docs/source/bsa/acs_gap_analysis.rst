@@ -33,7 +33,9 @@ Known gaps or mismatches
   responder. Core capabilities remain owned by the PCIe hard IP.
 * **Error injection semantics**: DVSEC-driven error injection and poison mode
   hook into the PCIe core ``cfg_err_*`` interface and BAR read path; coverage
-  is limited to the error classes exposed by the core.
+  is limited to the error classes exposed by the core. ACS e023/e024/e027
+  exercise error codes that do not map to a dedicated ``cfg_err_*`` input on
+  the 7-series hard IP, so the corresponding AER status bits cannot be set.
 
 Plan to close gaps
 ------------------

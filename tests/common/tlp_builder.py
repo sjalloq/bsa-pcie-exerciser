@@ -15,6 +15,22 @@ The LitePCIeTLPHeaderExtracter64b expects:
   - sink.dat[31:0]  = DW at lower address (DW0 for first beat)
   - sink.dat[63:32] = DW at higher address (DW1 for first beat)
 
+ENDIANNESS MODEL (CRITICAL - READ BEFORE ADDING NEW TLP TYPES):
+===============================================================
+LitePCIe with endianness="big" byte-swaps DATA payloads per DWORD, but NOT headers.
+
+When building TLPs for injection:
+  - HEADERS: Build directly with bit fields in correct positions (no swap needed)
+  - DATA PAYLOADS: Must be pre-swapped so they arrive correctly after depacketizer
+
+For DATA payloads, use one of these approaches:
+  - Integer values: Use dword_to_wire(value) helper function
+  - Bytes input:    Use int.from_bytes(data, 'big')
+
+Example: To write 0x80000000 to a config register:
+  - Send dword_to_wire(0x80000000) = 0x00000080 on wire
+  - Depacketizer swaps to 0x80000000 in register
+
 PCIe TLP Header Formats:
 - 3DW Header (32-bit address): Used for Memory Read/Write with address < 4GB
 - 4DW Header (64-bit address): Used for Memory Read/Write with address >= 4GB
@@ -26,6 +42,7 @@ TLP Type encodings (Fmt[2:0] | Type[4:0]):
 - Memory Write 64: Fmt=011, Type=00000 -> 0x60
 - Completion:      Fmt=000, Type=01010 -> 0x0A
 - Completion w/D:  Fmt=010, Type=01010 -> 0x4A
+- Config Write 0:  Fmt=010, Type=00100 -> 0x44
 
 ATS Translation Completion permission bits (bits [5:0]):
 - Bit 0: R (Read permission)
@@ -47,6 +64,34 @@ ATS_PERM_N     = 0x20  # No-snoop attribute
 # Common permission combinations
 ATS_PERM_RW          = ATS_PERM_R | ATS_PERM_W                    # 0x03: Read + Write
 ATS_PERM_RW_PRIV     = ATS_PERM_R | ATS_PERM_W | ATS_PERM_PRIV    # 0x07: Read + Write + Privileged
+
+
+# =============================================================================
+# Endianness Helpers
+# =============================================================================
+#
+# LitePCIe with endianness="big" swaps bytes within each DWORD on the data path.
+# This means:
+#   - TLP HEADERS are NOT swapped (bit positions match PCIe spec directly)
+#   - TLP DATA payloads ARE byte-swapped per DWORD
+#
+# When injecting TLPs into the testbench:
+#   - Build headers directly with bit fields in correct positions
+#   - Pre-swap data DWORDs so they arrive correctly after depacketizer swap
+#
+# For bytes input:  Use int.from_bytes(data, 'big') - reads bytes as big-endian
+# For int input:    Use dword_to_wire() below
+#
+
+def dword_to_wire(value: int) -> int:
+    """
+    Convert a 32-bit integer to wire format for LitePCIe big-endian mode.
+
+    The depacketizer will byte-swap this DWORD, so we pre-swap here.
+    Example: 0x80000000 -> 0x00000080 on wire -> 0x80000000 after depack swap.
+    """
+    v = value & 0xFFFFFFFF
+    return ((v & 0xFF) << 24) | ((v & 0xFF00) << 8) | ((v >> 8) & 0xFF00) | ((v >> 24) & 0xFF)
 
 
 class TLPBuilder:
@@ -573,3 +618,56 @@ class TLPBuilder:
         # DW1 is in upper 32 bits of beat 0
         dw1 = (beats[0]['dat'] >> 32) & 0xFFFFFFFF
         return (dw1 >> 16) & 0xFFFF
+
+    @staticmethod
+    def config_write_type0(dword_addr, data, requester_id=0x0000, tag=0,
+                           bus=0, device=1, function=0, first_be=0xF):
+        """
+        Build Configuration Write Type 0 TLP.
+
+        Used to write to an endpoint's extended configuration space.
+
+        Args:
+            dword_addr: DWORD address in config space (10 bits, max 0x3FF)
+            data: 32-bit data value to write
+            requester_id: 16-bit requester ID (root complex)
+            tag: 8-bit tag
+            bus: Target bus number (8 bits)
+            device: Target device number (5 bits)
+            function: Target function number (3 bits)
+            first_be: Byte enables (4 bits, default 0xF for full DWORD)
+
+        Returns:
+            List of beat dicts with 'dat' and 'be' keys
+
+        Config TLP Format (3DW header + 1DW data):
+            DW0: Fmt=010, Type=00100 (CfgWr0), Length=1
+            DW1: Requester ID, Tag, Last BE=0, First BE
+            DW2: Bus, Device, Function, Ext Reg, Register No
+            DW3: Data (32-bit write value)
+        """
+        # DW0: Fmt=010 (3DW+data), Type=00100 (CfgWr0), Length=1
+        dw0 = (0b010 << 29) | (0b00100 << 24) | 1
+
+        # DW1: Requester ID, Tag, Last BE=0, First BE
+        dw1 = (requester_id << 16) | (tag << 8) | (0 << 4) | (first_be & 0xF)
+
+        # DW2: Bus[23:16], Device[15:11], Function[10:8], Ext Reg[11:8], Register[7:2], [1:0]=00
+        # For extended config space: ext_reg[3:0] = dword_addr[9:6], register[5:0] = dword_addr[5:0]
+        ext_reg = (dword_addr >> 6) & 0xF
+        register_no = dword_addr & 0x3F
+        dw2 = ((bus & 0xFF) << 24) | \
+              ((device & 0x1F) << 19) | \
+              ((function & 0x7) << 16) | \
+              ((ext_reg & 0xF) << 8) | \
+              ((register_no & 0x3F) << 2)
+
+        # DW3: Data - pre-swap for big-endian wire format (see dword_to_wire docs)
+        dw3 = dword_to_wire(data)
+
+        beats = [
+            {'dat': (dw1 << 32) | dw0, 'be': 0xFF},  # DW0 lower, DW1 upper
+            {'dat': (dw3 << 32) | dw2, 'be': 0xFF},  # DW2 lower, DW3 upper
+        ]
+
+        return beats

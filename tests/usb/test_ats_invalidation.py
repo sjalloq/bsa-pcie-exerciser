@@ -1,7 +1,7 @@
 #
 # ATS Invalidation Message Tests (BSA e023-e025)
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Verifies ATS Invalidation Request message handling:
@@ -44,6 +44,11 @@ REG_ATS_RANGE_SIZE      = 0x030
 REG_ATS_PERM            = 0x038
 REG_USB_MON_CTRL        = 0x080
 
+# Config space ATS control register (extended config space DWORD address)
+# Base = 0x6B, ATS control = base + 1 = 0x6C
+CFG_ATS_CTRL_DWORD      = 0x6C
+CFG_ATS_ENABLE_BIT      = (1 << 31)
+
 # ATSCTL bit definitions
 ATSCTL_TRIGGER      = (1 << 0)
 ATSCTL_PRIVILEGED   = (1 << 1)
@@ -81,6 +86,31 @@ async def reset_dut(dut):
     dut.usb_rst.value = 0
 
     await ClockCycles(dut.sys_clk, 50)
+
+
+async def enable_ats_capability(pcie_bfm: PCIeBFM):
+    """
+    Enable ATS in extended config space.
+
+    The ATS engine is gated by config_space.ats_enable (bit 31 of ATS control).
+    This must be enabled before ATS translation requests will be generated.
+    """
+    dut = pcie_bfm.dut
+
+    # Build config write TLP to set ATS enable bit
+    beats = TLPBuilder.config_write_type0(
+        dword_addr=CFG_ATS_CTRL_DWORD,
+        data=CFG_ATS_ENABLE_BIT,
+        requester_id=0x0000,  # Root complex
+        bus=0,
+        device=1,
+        function=0,
+    )
+
+    await pcie_bfm.inject_tlp(beats, bar_hit=0)
+
+    # Wait for config write to take effect
+    await ClockCycles(dut.sys_clk, 30)
 
 
 async def enable_both_monitoring(usb_bfm: USBBFM):
@@ -184,6 +214,9 @@ async def test_ats_invalidation_request_clears_atc(dut):
     usb_bfm = USBBFM(dut)
     pcie_bfm = PCIeBFM(dut)
 
+    # Enable ATS capability in config space (required for ATS engine to work)
+    await enable_ats_capability(pcie_bfm)
+
     # Populate ATC with a translation
     test_addr = 0x10000000
     translated = 0x20000000
@@ -234,6 +267,9 @@ async def test_ats_invalidation_completion_sent(dut):
     usb_bfm = USBBFM(dut)
     pcie_bfm = PCIeBFM(dut)
 
+    # Enable ATS capability in config space (required for ATS engine to work)
+    await enable_ats_capability(pcie_bfm)
+
     await enable_both_monitoring(usb_bfm)
 
     # Populate ATC
@@ -278,6 +314,9 @@ async def test_ats_software_atc_clear(dut):
     usb_bfm = USBBFM(dut)
     pcie_bfm = PCIeBFM(dut)
 
+    # Enable ATS capability in config space (required for ATS engine to work)
+    await enable_ats_capability(pcie_bfm)
+
     # Populate ATC
     test_addr = 0x50000000
     success = await populate_atc_entry(usb_bfm, pcie_bfm, test_addr, 0x60000000)
@@ -313,6 +352,9 @@ async def test_ats_global_invalidation(dut):
     await reset_dut(dut)
     usb_bfm = USBBFM(dut)
     pcie_bfm = PCIeBFM(dut)
+
+    # Enable ATS capability in config space (required for ATS engine to work)
+    await enable_ats_capability(pcie_bfm)
 
     # Use a different address than other tests to avoid confusion
     test_addr = 0x70000000
@@ -360,6 +402,9 @@ async def test_ats_page_selective_invalidation(dut):
     usb_bfm = USBBFM(dut)
     pcie_bfm = PCIeBFM(dut)
 
+    # Enable ATS capability in config space (required for ATS engine to work)
+    await enable_ats_capability(pcie_bfm)
+
     # Populate ATC with entry at specific address
     test_addr = 0x90000000
     success = await populate_atc_entry(usb_bfm, pcie_bfm, test_addr, 0xA0000000)
@@ -403,6 +448,9 @@ async def test_ats_global_invalidation_with_pasid(dut):
     await reset_dut(dut)
     usb_bfm = USBBFM(dut)
     pcie_bfm = PCIeBFM(dut)
+
+    # Enable ATS capability in config space (required for ATS engine to work)
+    await enable_ats_capability(pcie_bfm)
 
     # Set a PASID value
     test_pasid = 0x1234

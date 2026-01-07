@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - ATS/ATC Tests
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
@@ -93,6 +93,11 @@ ATSCTL_PASID_EN    = (1 << 3)   # [3] PASID enable
 ATSCTL_EXEC_REQ    = (1 << 4)   # [4] Execute request
 ATSCTL_CLEAR_ATC   = (1 << 5)   # [5] Clear ATC (W1C)
 
+# Config space ATS control register (extended config space DWORD address)
+# Base = 0x6B, ATS control = base + 1 = 0x6C
+CFG_ATS_CTRL_DWORD = 0x6C
+CFG_ATS_ENABLE_BIT = (1 << 31)
+
 
 # =============================================================================
 # Test Utilities
@@ -104,6 +109,29 @@ async def reset_dut(dut):
     await ClockCycles(dut.sys_clk, 10)
     dut.sys_rst.value = 0
     await ClockCycles(dut.sys_clk, 10)
+
+
+async def enable_ats_capability(bfm: PCIeBFM):
+    """
+    Enable ATS in extended config space.
+
+    The ATS engine is gated by config_space.ats_enable (bit 31 of ATS control).
+    This must be enabled before ATS translation requests will be generated.
+    """
+    # Build config write TLP to set ATS enable bit
+    beats = TLPBuilder.config_write_type0(
+        dword_addr=CFG_ATS_CTRL_DWORD,
+        data=CFG_ATS_ENABLE_BIT,
+        requester_id=0x0000,  # Root complex
+        bus=0,
+        device=1,
+        function=0,
+    )
+
+    await bfm.inject_tlp(beats, bar_hit=0)
+
+    # Wait for config write to take effect
+    await ClockCycles(bfm.clk, 30)
 
 
 async def write_bar0_register(bfm, offset, data):
@@ -227,6 +255,7 @@ async def test_ats_request_generation(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     # Configure ATS: address and PASID
     test_addr_lo = 0x1000_0000
@@ -291,6 +320,7 @@ async def test_atc_pasid_mismatch(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     # =========================================================================
     # Step 1: Configure ATS with PASID=5 and trigger translation
@@ -429,6 +459,7 @@ async def test_atc_pasid_match(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     # =========================================================================
     # Step 1: Configure ATS with PASID=5 and trigger translation
@@ -812,6 +843,7 @@ async def test_ats_page_size_4kb(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     test_va = 0x1000_0000
     translated_pa = 0x8000_0000
@@ -880,6 +912,7 @@ async def test_ats_page_size_64kb(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     test_va = 0x2000_0000
     translated_pa = 0x9000_0000
@@ -948,6 +981,7 @@ async def test_ats_page_size_2mb(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     test_va = 0x3000_0000
     translated_pa = 0xA000_0000
@@ -1023,6 +1057,7 @@ async def test_ats_page_sizes_comprehensive(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     # Test cases: (s_field, human_readable_size)
     test_cases = [
@@ -1114,6 +1149,7 @@ async def test_atc_software_invalidation(dut):
 
     bfm = PCIeBFM(dut)
     await reset_dut(dut)
+    await enable_ats_capability(bfm)
 
     test_va = 0x1000_0000
     translated_pa = 0x8000_0000
