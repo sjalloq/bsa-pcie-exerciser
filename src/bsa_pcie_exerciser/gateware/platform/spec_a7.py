@@ -300,6 +300,12 @@ class Platform(Xilinx7SeriesPlatform):
             "set_property CFGBVS VCCO [current_design]",
             "set_property CONFIG_VOLTAGE 3.3 [current_design]",
         ]
+        self.toolchain.additional_commands += [
+            "report_timing -delay_type max -max_paths 50 -nworst 10 -path_type full -sort_by slack "
+            "-file {build_name}_timing_max.rpt",
+            "report_timing -delay_type min -max_paths 50 -nworst 10 -path_type full -sort_by slack "
+            "-file {build_name}_timing_min.rpt",
+        ]
 
     def create_programmer(self, name="openocd"):
         return OpenFPGALoader(cable="ft4232", fpga_part="xc7a35tcsg324", freq=20e6)

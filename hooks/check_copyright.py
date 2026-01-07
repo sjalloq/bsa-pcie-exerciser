@@ -25,20 +25,19 @@ CURRENT_YEAR = datetime.now().year
 AUTHOR = "Shareef Jalloq"
 LICENSE = "BSD-2-Clause"
 
-# Required copyright header pattern - supports single year or range
-# Matches: "Copyright (c) 2025 Author" or "Copyright (c) 2024-2025 Author"
-COPYRIGHT_PATTERN = re.compile(
-    r"^#\s*\n"
-    r"^#\s*.+\n"  # Title line
-    r"^#\s*\n"
-    r"^#\s*Copyright\s+\(c\)\s+(\d{4})(?:-(\d{4}))?\s+(.+)\n"
-    r"^#\s*SPDX-License-Identifier:\s+(.+)\n",
+# SPDX line (within the header).
+SPDX_LINE_PATTERN = re.compile(
+    r"^#\s*SPDX-License-Identifier:\s+(.+)$",
     re.MULTILINE
 )
 
-# Looser pattern to find any copyright line - supports single year or range
+# Copyright line pattern - supports single year, range, or year list.
+# Examples:
+#   "Copyright (c) 2025 Author"
+#   "Copyright (c) 2024-2025 Author"
+#   "Copyright (c) 2024, 2026 Author"
 COPYRIGHT_LINE_PATTERN = re.compile(
-    r"^#\s*Copyright\s+\(c\)\s+(\d{4})(?:-(\d{4}))?\s+(.+)$",
+    r"^#\s*Copyright\s+\(c\)\s+([0-9,\s-]+)\s+(.+)$",
     re.MULTILINE
 )
 
@@ -89,12 +88,30 @@ def get_all_python_files(root: Path) -> list[Path]:
     return files
 
 
-def check_copyright(path: Path) -> tuple[bool, str, tuple[int, int | None] | None]:
+def _parse_years(year_text: str) -> list[int]:
+    """Parse a year/range/list string into sorted unique years."""
+    years = [int(y) for y in re.findall(r"\d{4}", year_text)]
+    return sorted(set(years))
+
+
+def _format_years(years: list[int]) -> str:
+    """Format years as single, range, or list."""
+    if not years:
+        return "none"
+    years = sorted(set(years))
+    if len(years) == 1:
+        return str(years[0])
+    if years[-1] - years[0] + 1 == len(years):
+        return f"{years[0]}-{years[-1]}"
+    return ", ".join(str(y) for y in years)
+
+
+def check_copyright(path: Path) -> tuple[bool, str, list[int] | None]:
     """
     Check if file has correct copyright header.
 
     Returns:
-        (is_valid, message, (start_year, end_year or None))
+        (is_valid, message, [years] or None)
     """
     if not path.exists():
         return True, "File not found (probably deleted)", None
@@ -107,77 +124,63 @@ def check_copyright(path: Path) -> tuple[bool, str, tuple[int, int | None] | Non
     except Exception as e:
         return False, f"Cannot read: {e}", None
 
-    # Check for full header pattern
-    match = COPYRIGHT_PATTERN.search(content[:500])  # Only check first 500 chars
-    if match:
-        start_year = int(match.group(1))
-        end_year = int(match.group(2)) if match.group(2) else None
-        author = match.group(3).strip()
-        license_id = match.group(4).strip()
+    header = content[:500]
 
-        # The effective year is the end year (if range) or the single year
-        effective_year = end_year if end_year else start_year
+    copyright_lines = list(COPYRIGHT_LINE_PATTERN.finditer(header))
+    if not copyright_lines:
+        return False, "No copyright header found", None
 
-        issues = []
-        if effective_year != CURRENT_YEAR:
-            if end_year:
-                issues.append(f"year range {start_year}-{end_year} should end with {CURRENT_YEAR}")
-            else:
-                issues.append(f"year {start_year} should be {start_year}-{CURRENT_YEAR}")
-        if author != AUTHOR:
-            issues.append(f"author mismatch")
-        if license_id != LICENSE:
-            issues.append(f"license should be {LICENSE}")
+    spdx_match = SPDX_LINE_PATTERN.search(header)
+    if not spdx_match:
+        return False, "Missing SPDX-License-Identifier line", None
 
-        if issues:
-            return False, ", ".join(issues), (start_year, end_year)
-        return True, "OK", (start_year, end_year)
+    license_id = spdx_match.group(1).strip()
+    if license_id != LICENSE:
+        return False, f"license should be {LICENSE}", None
 
-    # Check for any copyright line (partial header)
-    line_match = COPYRIGHT_LINE_PATTERN.search(content[:500])
-    if line_match:
-        start_year = int(line_match.group(1))
-        end_year = int(line_match.group(2)) if line_match.group(2) else None
-        effective_year = end_year if end_year else start_year
+    author_years = None
+    for match in copyright_lines:
+        year_text = match.group(1).strip()
+        author = match.group(2).strip()
+        if author == AUTHOR:
+            author_years = _parse_years(year_text)
+            break
 
-        if effective_year != CURRENT_YEAR:
-            if end_year:
-                return False, f"Found copyright but year range {start_year}-{end_year} should end with {CURRENT_YEAR}", (start_year, end_year)
-            else:
-                return False, f"Found copyright but year {start_year} should be {start_year}-{CURRENT_YEAR}", (start_year, end_year)
-        return False, "Copyright found but header format incorrect", (start_year, end_year)
+    if author_years is None:
+        return True, "OK", None
 
-    return False, "No copyright header found", None
+    if CURRENT_YEAR not in author_years:
+        expected = _format_years(author_years + [CURRENT_YEAR])
+        return False, f"year list should include {CURRENT_YEAR} (expected {expected})", author_years
+
+    return True, "OK", author_years
 
 
-def update_copyright_year(path: Path, year_info: tuple[int, int | None]) -> bool:
-    """Update copyright year in file to show range ending with current year."""
-    start_year, end_year = year_info
-
-    # If already current year, nothing to do
-    effective_year = end_year if end_year else start_year
-    if effective_year == CURRENT_YEAR:
-        return False
+def update_copyright_year(path: Path, year_info: list[int]) -> bool:
+    """Update the current author's line to include the current year."""
 
     try:
         content = path.read_text()
+        updated = False
 
-        if end_year:
-            # Has a range already, update end year: "2024-2025" -> "2024-2026"
-            new_content = re.sub(
-                rf"(Copyright\s+\(c\)\s+{start_year})-{end_year}(\s+)",
-                rf"\g<1>-{CURRENT_YEAR}\g<2>",
-                content
-            )
-        else:
-            # Single year, convert to range: "2025" -> "2025-2026"
-            new_content = re.sub(
-                rf"(Copyright\s+\(c\)\s+){start_year}(\s+)",
-                rf"\g<1>{start_year}-{CURRENT_YEAR}\g<2>",
-                content
-            )
+        def _replace(match: re.Match) -> str:
+            nonlocal updated
+            year_text = match.group(1).strip()
+            author = match.group(2).strip()
+            if author != AUTHOR:
+                return match.group(0)
+            years = _parse_years(year_text)
+            if CURRENT_YEAR in years:
+                return match.group(0)
+            years.append(CURRENT_YEAR)
+            years = sorted(set(years))
+            updated = True
+            year_text = _format_years(years)
+            return f"# Copyright (c) {year_text} {author}"
 
-        if new_content != content:
+        new_content = COPYRIGHT_LINE_PATTERN.sub(_replace, content)
+
+        if updated and new_content != content:
             path.write_text(new_content)
             return True
         return False
@@ -186,14 +189,11 @@ def update_copyright_year(path: Path, year_info: tuple[int, int | None]) -> bool
         return False
 
 
-def format_year_info(year_info: tuple[int, int | None] | None) -> str:
+def format_year_info(year_info: list[int] | None) -> str:
     """Format year info for display."""
     if year_info is None:
         return "none"
-    start_year, end_year = year_info
-    if end_year:
-        return f"{start_year}-{end_year}"
-    return str(start_year)
+    return _format_years(year_info)
 
 
 def main():
@@ -231,6 +231,7 @@ def main():
     # Determine which files to check
     # When files are passed as args (pre-commit mode), be quiet by default
     pre_commit_mode = bool(args.files)
+    auto_fix = args.fix or pre_commit_mode
     if args.files:
         files = args.files
     elif args.all:
@@ -250,13 +251,11 @@ def main():
         is_valid, message, year_info = check_copyright(path)
 
         if not is_valid:
-            if args.fix and year_info is not None:
-                start_year, end_year = year_info
-                effective_year = end_year if end_year else start_year
-                if effective_year != CURRENT_YEAR:
+            if auto_fix and year_info is not None:
+                if CURRENT_YEAR not in year_info:
                     if update_copyright_year(path, year_info):
                         old_fmt = format_year_info(year_info)
-                        new_fmt = f"{start_year}-{CURRENT_YEAR}"
+                        new_fmt = _format_years(sorted(set(year_info + [CURRENT_YEAR])))
                         fixed.append(path)
                         print(f"Fixed: {path} ({old_fmt} -> {new_fmt})")
                         continue
@@ -273,7 +272,7 @@ def main():
     if errors:
         if not pre_commit_mode:
             print(f"\n{len(errors)} file(s) with copyright issues")
-            print(f"\nExpected: Copyright (c) <start>-{CURRENT_YEAR} {AUTHOR}")
+            print(f"\nExpected: Copyright (c) <years> {AUTHOR} (include {CURRENT_YEAR})")
         sys.exit(1)
 
     sys.exit(0)

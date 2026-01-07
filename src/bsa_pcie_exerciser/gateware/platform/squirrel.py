@@ -2,7 +2,7 @@
 #
 # Squirrel / CaptainDMA Platform
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Pin-compatible boards using XC7A35T-FGG484.
@@ -92,6 +92,12 @@ class Platform(Xilinx7SeriesPlatform):
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
             "set_property BITSTREAM.CONFIG.SPI_FALL_EDGE YES [current_design]",
             "set_property BITSTREAM.CONFIG.CONFIGRATE 66 [current_design]",
+        ]
+        self.toolchain.additional_commands += [
+            "report_timing -delay_type max -max_paths 50 -nworst 10 -path_type full -sort_by slack "
+            "-file {build_name}_timing_max.rpt",
+            "report_timing -delay_type min -max_paths 50 -nworst 10 -path_type full -sort_by slack "
+            "-file {build_name}_timing_min.rpt",
         ]
 
     def create_programmer(self, name="openocd"):

@@ -2,7 +2,7 @@
 # USB Etherbone - Wishbone over USB using Etherbone Protocol
 #
 # Copyright (c) 2015-2024 Florent Kermarrec <florent@enjoy-digital.fr>
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Adapted from LiteEth's Etherbone implementation for USB transport.
@@ -480,8 +480,12 @@ class EtherboneRecord(LiteXModule):
         # Receive mmap stream, encode it and send records.
         self.sender     = sender     = EtherboneRecordSender(buffer_depth)
         self.packetizer = packetizer = EtherboneRecordPacketizer()
+        self.record_buffer = record_buffer = stream.Buffer(
+            etherbone_record_description(32)
+        )
         self.comb += [
-            sender.source.connect(packetizer.sink),
+            sender.source.connect(record_buffer.sink),
+            record_buffer.source.connect(packetizer.sink),
             packetizer.source.connect(source),
             source.length.eq(
                 etherbone_record_header.length +
