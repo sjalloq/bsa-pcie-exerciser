@@ -19,6 +19,17 @@ from litex.soc.interconnect import stream
 from litepcie.common import phy_layout, msi_layout, intx_layout, get_bar_mask
 
 
+class _LinkStatusStub:
+    """Dummy _link_status to match S7PCIEPHY interface."""
+    def __init__(self):
+        self.fields = type('Fields', (), {
+            'status': Signal(reset=1),  # Link up by default
+            'rate':   Signal(),
+            'width':  Signal(6, reset=1),
+            'ltssm':  Signal(6),
+        })()
+
+
 class PHYStub(LiteXModule):
     """
     Drop-in replacement for S7PCIEPHY in simulation.
@@ -43,6 +54,9 @@ class PHYStub(LiteXModule):
         self.bar0_mask        = get_bar_mask(0x1000)  # 0xFFFFF000 - upper bits to mask off
         self.max_request_size = Signal(16, reset=512)
         self.max_payload_size = Signal(16, reset=256)
+
+        # Link status stub (mimics real PHY interface)
+        self._link_status = _LinkStatusStub()
 
         # Error reporting signals (directly settable, mimics S7PCIEPHY interface)
         self.cfg_err_ecrc                  = Signal()

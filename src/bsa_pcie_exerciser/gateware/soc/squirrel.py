@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - Squirrel/CaptainDMA Platform Support
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
@@ -27,16 +27,13 @@ class SquirrelCRG(LiteXModule):
         self.rst    = Signal()
         self.cd_sys = ClockDomain()
 
-        # 100MHz oscillator on Squirrel
+        # 100MHz oscillator on Squirrel/CaptainDMA
         clk100 = platform.request("clk100")
 
         # PLL: 100MHz -> sys_clk_freq
         self.pll = pll = S7PLL(speedgrade=-2)
-        self.comb += pll.reset.eq(self.rst)
         pll.register_clkin(clk100, 100e6)
         pll.create_clkout(self.cd_sys, sys_clk_freq, margin=0)
-
-        platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin)
 
 
 class SquirrelSoC(BSAExerciserSoC):
@@ -58,21 +55,26 @@ class SquirrelSoC(BSAExerciserSoC):
 
     def __init__(self, platform, sys_clk_freq=125e6, usb_phy=None, **kwargs):
         # Initialize base SoC with SquirrelCRG
-        super().__init__(platform, sys_clk_freq, crg_cls=SquirrelCRG, **kwargs)
+        super().__init__(
+            platform,
+            sys_clk_freq,
+            crg_cls=SquirrelCRG,
+            pcie_gt_locn="X0Y2",
+            **kwargs,
+        )
+
+        simulation = kwargs.get('simulation', False)
 
         # USB clock domain (from FT601's 100MHz clock or simulation)
         self.cd_usb = ClockDomain()
 
         # Use injected USB PHY or create from platform pads
-        if usb_phy is not None:
+        if simulation:
             # Simulation mode: use injected PHY stub
             self.usb_phy = usb_phy
-            # In simulation, the USB clock domain is managed by the testbench
         else:
             # Hardware mode: create FT601Sync from platform pads
             usb_pads = platform.request("usb_fifo")
-
-            # Connect FT601 clock to USB domain
             self.comb += self.cd_usb.clk.eq(usb_pads.clk)
             self.specials += AsyncResetSynchronizer(self.cd_usb, self.crg.rst)
 
@@ -93,9 +95,40 @@ class SquirrelSoC(BSAExerciserSoC):
         self._add_usb_monitor()
 
         # Clock constraints (only for hardware mode with real USB pads)
-        if usb_phy is None:
+        if not simulation:
             platform.add_period_constraint(usb_pads.clk, 1e9/100e6)
-            platform.add_false_path_constraints(self.crg.cd_sys.clk, self.cd_usb.clk)
+
+        # -----------------------------------------------------------------
+        # Board I/O: LEDs and FT2232 Reset
+        # -----------------------------------------------------------------
+
+        # LED1: PCIe link up status
+        led1 = platform.request("user_led", 0)
+        self.comb += led1.eq(self.pcie_phy._link_status.fields.status)
+
+        # LED2: Heartbeat (~1Hz blink at 125MHz sys_clk)
+        # Use bit 26 of timestamp counter: 125MHz / 2^26 ≈ 1.86Hz
+        led2 = platform.request("user_led", 1)
+        self.comb += led2.eq(self.timestamp[26])
+
+        # FT2232 Reset: Drive high (inactive) to keep JTAG chip operational
+        ft2232_rst_n = platform.request("ft2232_rst_n")
+        self.comb += ft2232_rst_n.eq(1)
+
+        # -----------------------------------------------------------------
+        # Async clock paths
+        # -----------------------------------------------------------------
+
+        if not simulation:
+            platform.add_false_path_constraint(self.crg.cd_sys.clk, self.cd_usb.clk)
+            platform.add_false_path_constraint(self.cd_usb.clk, self.crg.cd_sys.clk)
+
+            platform.toolchain.pre_placement_commands.append(
+                "set_clock_groups -asynchronous "
+                "-group [get_clocks squirrelsoc_clkout] "
+                "-group [get_clocks {{clk125_clk clk250_clk squirrelsoc_s7pciephy_clkout*}}]"
+            )
+
 
     def _add_usb_monitor(self):
         """Add USB TLP monitor subsystem on channel 1."""
@@ -103,132 +136,25 @@ class SquirrelSoC(BSAExerciserSoC):
         self.timestamp = Signal(64)
         self.sync += self.timestamp.eq(self.timestamp + 1)
 
-        # USB Monitor Subsystem
+        # Get stream endpoints to tap
+        rx_req_source = self.pcie_endpoint.depacketizer.req_source
+        rx_cpl_source = self.pcie_endpoint.depacketizer.cmp_source
+        tx_req_sink = self.pcie_endpoint.packetizer.req_sink
+        tx_cpl_sink = self.pcie_endpoint.packetizer.cmp_sink
+
+        # USB Monitor Subsystem - taps the stream endpoints directly
+        # Pipeline registers inside USBMonitorSubsystem break timing paths
         self.usb_monitor = USBMonitorSubsystem(
+            rx_req_source=rx_req_source,
+            rx_cpl_source=rx_cpl_source,
+            tx_req_sink=tx_req_sink,
+            tx_cpl_sink=tx_cpl_sink,
             data_width=self.pcie_phy.data_width,
             payload_fifo_depth=512,
         )
 
         # Connect timestamp
         self.comb += self.usb_monitor.timestamp.eq(self.timestamp)
-
-        # -------------------------------------------------------------------------
-        # RX Tap (depacketizer outputs - inbound TLPs)
-        # -------------------------------------------------------------------------
-
-        req_source = self.pcie_endpoint.depacketizer.req_source
-        cpl_source = self.pcie_endpoint.depacketizer.cmp_source
-
-        # RX Request tap
-        self.comb += [
-            self.usb_monitor.rx_req_valid.eq(req_source.valid),
-            self.usb_monitor.rx_req_ready.eq(req_source.ready),
-            self.usb_monitor.rx_req_first.eq(req_source.first),
-            self.usb_monitor.rx_req_last.eq(req_source.last),
-            self.usb_monitor.rx_req_we.eq(req_source.we),
-            self.usb_monitor.rx_req_adr.eq(req_source.adr),
-            self.usb_monitor.rx_req_len.eq(req_source.len),
-            self.usb_monitor.rx_req_req_id.eq(req_source.req_id),
-            self.usb_monitor.rx_req_tag.eq(req_source.tag),
-            self.usb_monitor.rx_req_dat.eq(req_source.dat),
-        ]
-
-        # Optional RX request fields
-        if hasattr(req_source, 'first_be'):
-            self.comb += self.usb_monitor.rx_req_first_be.eq(req_source.first_be)
-        if hasattr(req_source, 'last_be'):
-            self.comb += self.usb_monitor.rx_req_last_be.eq(req_source.last_be)
-        if hasattr(req_source, 'attr'):
-            self.comb += self.usb_monitor.rx_req_attr.eq(req_source.attr)
-        if hasattr(req_source, 'at'):
-            self.comb += self.usb_monitor.rx_req_at.eq(req_source.at)
-        if hasattr(req_source, 'bar_hit'):
-            self.comb += self.usb_monitor.rx_req_bar_hit.eq(req_source.bar_hit)
-
-        # RX Completion tap
-        self.comb += [
-            self.usb_monitor.rx_cpl_valid.eq(cpl_source.valid),
-            self.usb_monitor.rx_cpl_ready.eq(cpl_source.ready),
-            self.usb_monitor.rx_cpl_first.eq(cpl_source.first),
-            self.usb_monitor.rx_cpl_last.eq(cpl_source.last),
-            self.usb_monitor.rx_cpl_adr.eq(cpl_source.adr),
-            self.usb_monitor.rx_cpl_len.eq(cpl_source.len),
-            self.usb_monitor.rx_cpl_req_id.eq(cpl_source.req_id),
-            self.usb_monitor.rx_cpl_tag.eq(cpl_source.tag),
-            self.usb_monitor.rx_cpl_dat.eq(cpl_source.dat),
-        ]
-
-        # Optional RX completion fields
-        if hasattr(cpl_source, 'status'):
-            self.comb += self.usb_monitor.rx_cpl_status.eq(cpl_source.status)
-        if hasattr(cpl_source, 'cmp_id'):
-            self.comb += self.usb_monitor.rx_cpl_cmp_id.eq(cpl_source.cmp_id)
-        if hasattr(cpl_source, 'byte_count'):
-            self.comb += self.usb_monitor.rx_cpl_byte_count.eq(cpl_source.byte_count)
-
-        # -------------------------------------------------------------------------
-        # TX Tap (packetizer inputs - outbound TLPs)
-        # -------------------------------------------------------------------------
-
-        req_sink = self.pcie_endpoint.packetizer.req_sink
-        cpl_sink = self.pcie_endpoint.packetizer.cmp_sink
-
-        # TX Request tap
-        self.comb += [
-            self.usb_monitor.tx_req_valid.eq(req_sink.valid),
-            self.usb_monitor.tx_req_ready.eq(req_sink.ready),
-            self.usb_monitor.tx_req_first.eq(req_sink.first),
-            self.usb_monitor.tx_req_last.eq(req_sink.last),
-            self.usb_monitor.tx_req_we.eq(req_sink.we),
-            self.usb_monitor.tx_req_adr.eq(req_sink.adr),
-            self.usb_monitor.tx_req_len.eq(req_sink.len),
-            self.usb_monitor.tx_req_req_id.eq(req_sink.req_id),
-            self.usb_monitor.tx_req_tag.eq(req_sink.tag),
-            self.usb_monitor.tx_req_dat.eq(req_sink.dat),
-        ]
-
-        # Optional TX request fields
-        if hasattr(req_sink, 'first_be'):
-            self.comb += self.usb_monitor.tx_req_first_be.eq(req_sink.first_be)
-        if hasattr(req_sink, 'last_be'):
-            self.comb += self.usb_monitor.tx_req_last_be.eq(req_sink.last_be)
-        if hasattr(req_sink, 'attr'):
-            self.comb += self.usb_monitor.tx_req_attr.eq(req_sink.attr)
-        if hasattr(req_sink, 'at'):
-            self.comb += self.usb_monitor.tx_req_at.eq(req_sink.at)
-        if hasattr(req_sink, 'pasid_en'):
-            self.comb += self.usb_monitor.tx_req_pasid_valid.eq(req_sink.pasid_en)
-        if hasattr(req_sink, 'pasid_val'):
-            self.comb += self.usb_monitor.tx_req_pasid.eq(req_sink.pasid_val)
-        if hasattr(req_sink, 'privileged'):
-            self.comb += self.usb_monitor.tx_req_privileged.eq(req_sink.privileged)
-        if hasattr(req_sink, 'execute'):
-            self.comb += self.usb_monitor.tx_req_execute.eq(req_sink.execute)
-
-        # TX Completion tap
-        self.comb += [
-            self.usb_monitor.tx_cpl_valid.eq(cpl_sink.valid),
-            self.usb_monitor.tx_cpl_ready.eq(cpl_sink.ready),
-            self.usb_monitor.tx_cpl_first.eq(cpl_sink.first),
-            self.usb_monitor.tx_cpl_last.eq(cpl_sink.last),
-            self.usb_monitor.tx_cpl_adr.eq(cpl_sink.adr),
-            self.usb_monitor.tx_cpl_len.eq(cpl_sink.len),
-            self.usb_monitor.tx_cpl_req_id.eq(cpl_sink.req_id),
-            self.usb_monitor.tx_cpl_tag.eq(cpl_sink.tag),
-            self.usb_monitor.tx_cpl_dat.eq(cpl_sink.dat),
-        ]
-
-        # Optional TX completion fields
-        if hasattr(cpl_sink, 'status'):
-            self.comb += self.usb_monitor.tx_cpl_status.eq(cpl_sink.status)
-        if hasattr(cpl_sink, 'cmp_id'):
-            self.comb += self.usb_monitor.tx_cpl_cmp_id.eq(cpl_sink.cmp_id)
-        if hasattr(cpl_sink, 'byte_count'):
-            self.comb += self.usb_monitor.tx_cpl_byte_count.eq(cpl_sink.byte_count)
-
-        # -------------------------------------------------------------------------
-        # Control (from BSA registers)
-        # -------------------------------------------------------------------------
 
         # Connect control signals from USB_MON registers
         self.comb += [

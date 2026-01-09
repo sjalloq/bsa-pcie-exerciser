@@ -489,12 +489,12 @@ class EtherboneRecord(LiteXModule):
             packetizer.source.connect(source),
             source.length.eq(
                 etherbone_record_header.length +
-                (sender.source.wcount != 0) * 4 + sender.source.wcount * 4 +
-                (sender.source.rcount != 0) * 4 + sender.source.rcount * 4
+                (record_buffer.source.wcount != 0) * 4 + record_buffer.source.wcount * 4 +
+                (record_buffer.source.rcount != 0) * 4 + record_buffer.source.rcount * 4
             ),
         ]
         if endianness == "big":
-            self.comb += packetizer.sink.data.eq(reverse_bytes(sender.source.data))
+            self.comb += packetizer.sink.data.eq(reverse_bytes(record_buffer.source.data))
 
 
 # =============================================================================

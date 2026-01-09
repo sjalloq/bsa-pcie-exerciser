@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - Test Platform Stub
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
@@ -28,6 +28,8 @@ class TestPlatform:
         self._signals = {}
         self._constraints = []
         self._sources = []
+        self._pre_synthesis_commands = []
+        self._pre_placement_commands = []
 
     def request(self, name, number=None, loose=False):
         """Return dummy signals for any pad request."""
@@ -58,6 +60,9 @@ class TestPlatform:
     def add_false_path_constraints(self, *args, **kwargs):
         pass
 
+    def add_false_path_constraint(self, *args, **kwargs):
+        pass
+
     def add_platform_command(self, *args, **kwargs):
         pass
 
@@ -76,8 +81,12 @@ class TestPlatform:
 
     @property
     def pre_synthesis_commands(self):
-        return []
+        return self._pre_synthesis_commands
+
+    @property
+    def pre_placement_commands(self):
+        return self._pre_placement_commands
 
     def append(self, *args):
-        """For toolchain.pre_synthesis_commands.append()"""
+        """For toolchain.*.append()"""
         pass

@@ -26,11 +26,11 @@ _io = [
     ("user_led", 0, Pins("Y6"), IOStandard("LVCMOS33")),
     ("user_led", 1, Pins("AB5"), IOStandard("LVCMOS33")),
 
-    # User Switches (directly active low)
+    # User Switches (active low)
     ("user_sw", 0, Pins("AB3"), IOStandard("LVCMOS33")),
     ("user_sw", 1, Pins("AA5"), IOStandard("LVCMOS33")),
 
-    # FT2232 Reset (directly active low, directly active in FPGA to FT2232)
+    # FT2232 Reset (active low, directly active in FPGA to FT2232)
     ("ft2232_rst_n", 0, Pins("F21"), IOStandard("LVCMOS33")),
 
     # PCIe x1
@@ -85,6 +85,8 @@ class Platform(Xilinx7SeriesPlatform):
     def __init__(self, variant="xc7a35t", toolchain="vivado"):
         Xilinx7SeriesPlatform.__init__(self, f"{variant}fgg484-2", _io, toolchain=toolchain)
 
+        self.toolchain.pre_optimize_commands.append("write_verilog -force {build_name}_synth.v")
+
         self.toolchain.bitstream_commands = [
             "set_property CFGBVS Vcco [current_design]",
             "set_property CONFIG_VOLTAGE 3.3 [current_design]",
@@ -93,15 +95,22 @@ class Platform(Xilinx7SeriesPlatform):
             "set_property BITSTREAM.CONFIG.SPI_FALL_EDGE YES [current_design]",
             "set_property BITSTREAM.CONFIG.CONFIGRATE 66 [current_design]",
         ]
+
         self.toolchain.additional_commands += [
-            "report_timing -delay_type max -max_paths 50 -nworst 10 -path_type full -sort_by slack "
-            "-file {build_name}_timing_max.rpt",
-            "report_timing -delay_type min -max_paths 50 -nworst 10 -path_type full -sort_by slack "
-            "-file {build_name}_timing_min.rpt",
+            # Additional timing reports
+            "report_timing -delay_type max -max_paths 50 -nworst 10 -path_type full -sort_by slack -file {build_name}_timing_max.rpt",
+            "report_timing -delay_type min -max_paths 50 -nworst 10 -path_type full -sort_by slack -file {build_name}_timing_min.rpt",
+            "report_pulse_width -file {build_name}_timing_pulse_width.rpt",
+
+            # Write out the final netlist
+            "write_verilog -force {build_name}_routed.v",
+
+            # Generate .bin file for direct SPI flash programming (IS25LP032D = 32Mbit)
+            "write_cfgmem -force -format bin -size 32 -interface SPIx4 -loadbit {{up 0x0 {build_name}.bit}} {build_name}.bin",
         ]
 
     def create_programmer(self, name="openocd"):
-        return OpenFPGALoader(cable="ft2232")
+        return OpenFPGALoader(cable="ft4232")
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)

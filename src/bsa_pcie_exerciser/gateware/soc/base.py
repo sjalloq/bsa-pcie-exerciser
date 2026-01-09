@@ -63,7 +63,15 @@ class BSAExerciserSoC(SoCMini):
         "csr": 0x8000_0000,
     }
 
-    def __init__(self, platform, sys_clk_freq=125e6, crg_cls=None, pcie_phy=None, simulation=False):
+    def __init__(
+        self,
+        platform,
+        sys_clk_freq=125e6,
+        crg_cls=None,
+        pcie_phy=None,
+        simulation=False,
+        pcie_gt_locn="X0Y0",
+    ):
         """
         Initialize BSA Exerciser SoC.
 
@@ -73,6 +81,7 @@ class BSAExerciserSoC(SoCMini):
             crg_cls: CRG class to instantiate (required for hardware builds)
             pcie_phy: Optional PHY instance (for simulation with PHYStub)
             simulation: If True, skip hardware-specific initialization (CRG, LTSSM)
+            pcie_gt_locn: PCIe GTP channel location suffix (eg. X0Y0, X0Y2)
         """
 
         # SoCMini -----------------------------------------------------------------
@@ -94,10 +103,8 @@ class BSAExerciserSoC(SoCMini):
         if pcie_phy is not None:
             self.pcie_phy = pcie_phy
         else:
-            self.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x1"),
-                data_width = 64,
-                cd         = "sys",
-            )
+            # Prevent LiteX inserting BUFGs on the outputs from the MMCM as they cause pulse width timing violations.
+            self.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x1"), mmcm_clk125_buf=None, mmcm_clk250_buf=None)
 
             # Multi-BAR Configuration ---------------------------------------------
             # Configure the Xilinx PCIe IP for multiple BARs and Device ID
@@ -114,21 +121,21 @@ class BSAExerciserSoC(SoCMini):
                 "Bar0_Scale"        : "Kilobytes",
                 "Bar0_Size"         : 4,
                 "Bar0_Type"         : "Memory",
-                "Bar0_Prefetchable" : False,
+                "Bar0_Prefetchable" : "false",
 
                 # BAR1: DMA Buffer (16KB)
                 "Bar1_Enabled"      : True,
                 "Bar1_Scale"        : "Kilobytes",
                 "Bar1_Size"         : 16,
                 "Bar1_Type"         : "Memory",
-                "Bar1_Prefetchable" : False,
+                "Bar1_Prefetchable" : "false",
 
                 # BAR2: MSI-X Table (sized for 2048 vectors, 16 used)
                 "Bar2_Enabled"      : True,
                 "Bar2_Scale"        : "Kilobytes",
                 "Bar2_Size"         : 32,
                 "Bar2_Type"         : "Memory",
-                "Bar2_Prefetchable" : False,  # MSI-X must be non-prefetchable
+                "Bar2_Prefetchable" : "false",  # MSI-X must be non-prefetchable
 
                 # BAR3/4: Disabled
                 "Bar3_Enabled"      : False,
@@ -139,7 +146,7 @@ class BSAExerciserSoC(SoCMini):
                 "Bar5_Scale"        : "Kilobytes",
                 "Bar5_Size"         : 4,
                 "Bar5_Type"         : "Memory",
-                "Bar5_Prefetchable" : False,  # MSI-X must be non-prefetchable
+                "Bar5_Prefetchable" : "false",  # MSI-X must be non-prefetchable
 
                 # MSI-X Configuration (16 vectors)
                 "MSI_Enabled"       : False,  # Disable legacy MSI
@@ -164,36 +171,21 @@ class BSAExerciserSoC(SoCMini):
                 # User-defined extended configuration space (ACS capabilities/DVSEC)
                 "EXT_PCI_CFG_Space"            : True,
                 "EXT_PCI_CFG_Space_Addr"       : f"{USER_EXT_CFG_DWORD_BASE:X}",
+
             })
 
             # LTSSM Tracer for link debugging
             self.pcie_phy.add_ltssm_tracer()
 
-            # Period constraint on sys_clk
-            platform.add_period_constraint(self.crg.cd_sys.clk, 1e9/sys_clk_freq)
-
             # GTP channel location (reset from .xci, then set explicitly)
+            pcie_gt_loc = f"GTPE2_CHANNEL_{pcie_gt_locn}"
             platform.toolchain.pre_placement_commands.append(
                 "reset_property LOC [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]"
             )
             platform.toolchain.pre_placement_commands.append(
-                "set_property LOC GTPE2_CHANNEL_X0Y0 [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]"
+                f"set_property LOC {pcie_gt_loc} "
+                "[get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]"
             )
-
-            # PCIe <-> Sys-Clk false paths (using actual Vivado clock names)
-            false_paths = [
-                ("{{*s7pciephy_clkout0}}", "sys_clk"),
-                ("{{*s7pciephy_clkout1}}", "sys_clk"),
-                ("{{*s7pciephy_clkout3}}", "sys_clk"),
-                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}")
-            ]
-            for clk0, clk1 in false_paths:
-                platform.toolchain.pre_placement_commands.append(
-                    f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]"
-                )
-                platform.toolchain.pre_placement_commands.append(
-                    f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]"
-                )
 
         # DMA Buffer and Handler --------------------------------------------------
         self.dma_buffer = BSADMABuffer(
