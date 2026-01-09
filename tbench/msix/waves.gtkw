@@ -1,0 +1,42 @@
+[*]
+[*] GTKWave Analyzer v3.3.118 (w)1999-2023 BSI
+[*] Thu Dec 18 22:22:36 2025
+[*]
+[dumpfile] "dump.fst"
+[dumpfile_mtime] "Thu Dec 18 22:19:09 2025"
+[dumpfile_size] 5503
+[savefile] "waves.gtkw"
+[timestart] 0
+[size] 2513 1728
+[pos] -1 -1
+*-17.155714 4 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] tb_msix.
+[sst_width] 502
+[signals_width] 319
+[sst_expanded] 1
+[sst_vpaned_height] 549
+@28
+tb_msix.sys_clk
+tb_msix.sys_rst
+@800201
+-BAR2 Request
+@29
+tb_msix.bar2_req_sink_valid
+tb_msix.bar2_req_sink_ready
+tb_msix.bar2_req_sink_we
+@23
+tb_msix.bar2_req_sink_adr[31:0]
+tb_msix.bar2_req_sink_len[9:0]
+tb_msix.bar2_req_sink_tag[7:0]
+tb_msix.bar2_req_sink_req_id[15:0]
+@29
+tb_msix.bar2_req_sink_first
+tb_msix.bar2_req_sink_last
+@23
+tb_msix.bar2_req_sink_first_be[3:0]
+tb_msix.bar2_req_sink_last_be[3:0]
+tb_msix.bar2_req_sink_dat[63:0]
+@1000201
+-BAR2 Request
+[pattern_trace] 1
+[pattern_trace] 0

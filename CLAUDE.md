@@ -48,16 +48,16 @@ bsa-pcie-exerciser --load
 
 ```bash
 # From project root:
-source .venv/bin/activate && module load verilator && cd tests/<bench> && make sim
+source .venv/bin/activate && module load verilator && cd tbench/<bench> && make sim
 
 # With clean build:
-source .venv/bin/activate && module load verilator && cd tests/<bench> && make clean && make sim
+source .venv/bin/activate && module load verilator && cd tbench/<bench> && make clean && make sim
 
 # Run specific test(s):
 make sim COCOTB_TEST_FILTER=<testname_string>
 
 # Example:
-cd tests/usb && make sim COCOTB_TEST_FILTER=test_tx_monitor_msix
+cd tbench/usb && make sim COCOTB_TEST_FILTER=test_tx_monitor_msix
 ```
 
 ## Architecture
