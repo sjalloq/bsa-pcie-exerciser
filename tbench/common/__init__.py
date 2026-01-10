@@ -15,10 +15,10 @@ This package provides:
 - TLPBuilder: Helper functions for constructing TLP packets
 """
 
-from tests.common.platform import TestPlatform
-from tests.common.phy_stub import PHYStub
-from tests.common.pcie_bfm import PCIeBFM, TLPRequestSource, TLPCompletionSink
-from tests.common.tlp_builder import TLPBuilder
+from tbench.common.platform import TestPlatform
+from tbench.common.phy_stub import PHYStub
+from tbench.common.pcie_bfm import PCIeBFM, TLPRequestSource, TLPCompletionSink
+from tbench.common.tlp_builder import TLPBuilder
 
 __all__ = [
     'TestPlatform',

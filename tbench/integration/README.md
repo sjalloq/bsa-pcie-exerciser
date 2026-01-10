@@ -219,8 +219,8 @@ Tests use shared BFMs from `tests/common/`:
 ### PCIeBFM Usage
 
 ```python
-from tests.common.pcie_bfm import PCIeBFM
-from tests.common.tlp_builder import TLPBuilder
+from tbench.common.pcie_bfm import PCIeBFM
+from tbench.common.tlp_builder import TLPBuilder
 
 bfm = PCIeBFM(dut)
 

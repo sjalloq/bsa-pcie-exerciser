@@ -28,8 +28,8 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
 
-from tests.common.pcie_bfm import PCIeBFM
-from tests.common.tlp_builder import TLPBuilder
+from tbench.common.pcie_bfm import PCIeBFM
+from tbench.common.tlp_builder import TLPBuilder
 
 
 async def reset_dut(dut):

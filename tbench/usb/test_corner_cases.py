@@ -22,9 +22,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.common.usb_bfm import USBBFM
-from tests.common.pcie_bfm import PCIeBFM
-from tests.common.tlp_builder import TLPBuilder
+from tbench.common.usb_bfm import USBBFM
+from tbench.common.pcie_bfm import PCIeBFM
+from tbench.common.tlp_builder import TLPBuilder
 
 from bsa_pcie_exerciser.common.protocol import (
     parse_tlp_packet, TLPPacket, TLPType, Direction,

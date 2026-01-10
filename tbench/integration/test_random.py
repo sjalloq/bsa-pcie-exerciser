@@ -27,9 +27,9 @@ from cocotb.triggers import RisingEdge, ClockCycles
 # Add parent directories to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.common.pcie_bfm import PCIeBFM
-from tests.common.tlp_builder import TLPBuilder
-from tests.common.randomizer import (
+from tbench.common.pcie_bfm import PCIeBFM
+from tbench.common.tlp_builder import TLPBuilder
+from tbench.common.randomizer import (
     TLPRandomizer,
     TLPConstraints,
     BAR0_REGISTER_CONSTRAINTS,
@@ -38,7 +38,7 @@ from tests.common.randomizer import (
     DMA_HOST_CONSTRAINTS,
     STRESS_TEST_CONSTRAINTS,
 )
-from tests.common.coverage import get_coverage, CoverageCollector
+from tbench.common.coverage import get_coverage, CoverageCollector
 
 # Import register offset constants from BSA registers module
 from bsa_pcie_exerciser.gateware.core.bsa_registers import (

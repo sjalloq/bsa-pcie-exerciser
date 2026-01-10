@@ -22,8 +22,8 @@ from cocotb.triggers import RisingEdge, ClockCycles
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.common.pcie_bfm import PCIeBFM
-from tests.common.tlp_builder import TLPBuilder
+from tbench.common.pcie_bfm import PCIeBFM
+from tbench.common.tlp_builder import TLPBuilder
 
 
 # =============================================================================

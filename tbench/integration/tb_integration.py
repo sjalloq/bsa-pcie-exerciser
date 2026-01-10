@@ -25,8 +25,8 @@ from litex.gen import *
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.common.platform import TestPlatform
-from tests.common.phy_stub import PHYStub
+from tbench.common.platform import TestPlatform
+from tbench.common.phy_stub import PHYStub
 
 from bsa_pcie_exerciser.gateware.soc import BSAExerciserSoC
 

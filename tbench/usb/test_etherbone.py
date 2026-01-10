@@ -16,8 +16,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.common.usb_bfm import USBBFM
-from tests.common.pcie_bfm import PCIeBFM
+from tbench.common.usb_bfm import USBBFM
+from tbench.common.pcie_bfm import PCIeBFM
 
 
 # =============================================================================
@@ -263,7 +263,7 @@ async def test_etherbone_concurrent_with_pcie(dut):
     await usb_bfm.send_etherbone_write(REG_DMA_OFFSET, test_value)
 
     # Read via PCIe (BAR0 CSR read)
-    from tests.common.tlp_builder import TLPBuilder
+    from tbench.common.tlp_builder import TLPBuilder
 
     # Build a Memory Read TLP for BAR0
     beats = TLPBuilder.memory_read_32(
