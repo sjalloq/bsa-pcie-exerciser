@@ -3,9 +3,9 @@ SHELL = /bin/bash
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BSA_EXERCISER := bsa-pcie-exerciser
 
-# Default platform (spec_a7 or squirrel)
-PLATFORM ?= squirrel
-PLATFORMS ?= spec_a7 squirrel
+# Default platform (spec_a7, squirrel, or captain)
+PLATFORM ?= captain
+PLATFORMS ?= spec_a7 squirrel captain
 
 RELEASE_TAG ?= $(shell git describe --tags --dirty --always 2>/dev/null)
 RELEASE_DIR ?= release/$(RELEASE_TAG)
@@ -23,8 +23,8 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-16s: %s\n", $$1, $$2}'
 	@echo ""
 	@echo "VARIABLES:"
-	@echo "  PLATFORM        : Target platform (default: spec_a7)"
-	@echo "                    Options: spec_a7, squirrel"
+	@echo "  PLATFORM        : Target platform (default: captain)"
+	@echo "                    Options: spec_a7, squirrel, captain"
 
 logs:
 	@mkdir -p logs
