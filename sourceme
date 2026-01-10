@@ -19,10 +19,9 @@ fi
 
 if [[ ! -d "$VENV" ]]; then
   echo "Creating new virtual environment..."
-  python3.11 -m venv "$VENV"
+  uv venv -p python3.11 "$VENV"
   source "$VENV/bin/activate"
-  pip install -U pip wheel
-  pip install -e ".[all]"
+  uv pip install -e ".[all]"
 else
   echo "Using existing virtual environment..."
   source "$VENV/bin/activate"

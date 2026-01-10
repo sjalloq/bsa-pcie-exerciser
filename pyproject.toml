@@ -55,6 +55,7 @@ dev = [
     "cocotb>=1.8",
     "cocotb-test",
     "repopack",
+    "pre-commit",
 ]
 docs = [
     "sphinx",
