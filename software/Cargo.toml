@@ -1,0 +1,31 @@
+[package]
+name = "ft601"
+version = "0.1.0"
+edition = "2021"
+description = "FT601 USB bridge library with Etherbone protocol support"
+license = "BSD-2-Clause"
+
+[lib]
+name = "ft601"
+path = "src/lib.rs"
+
+[[bin]]
+name = "litex-server"
+path = "src/bin/litex-server.rs"
+
+[[bin]]
+name = "eb"
+path = "src/bin/eb.rs"
+
+[[bin]]
+name = "debug-usb"
+path = "src/bin/debug_usb.rs"
+
+[[bin]]
+name = "ft601-config"
+path = "src/bin/ft601_config.rs"
+
+[dependencies]
+d3xx = { version = "0.0.3", features = ["config"] }
+log = "0.4"
+env_logger = "0.11"

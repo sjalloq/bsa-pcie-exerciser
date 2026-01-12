@@ -16,3 +16,4 @@ vivado.*
 coverage_*.*
 
 obj_dir
+software/target
