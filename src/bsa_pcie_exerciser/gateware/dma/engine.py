@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - DMA Engine
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # DMA engine for BSA exerciser. Performs controlled DMA transfers between
@@ -60,7 +60,6 @@ class BSADMAEngine(LiteXModule):
     def __init__(self, phy, buffer, data_width=64, max_request_size=MAX_REQUEST_SIZE):
         assert data_width >= 64, "Minimum 64-bit data width"
 
-        self.phy = phy
         self.data_width = data_width
         self.max_request_size = max_request_size
 

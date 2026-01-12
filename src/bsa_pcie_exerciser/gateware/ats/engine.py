@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - ATS Engine
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Generates ATS Translation Request TLPs and handles Translation Completions.
@@ -86,7 +86,6 @@ class ATSEngine(LiteXModule):
     def __init__(self, phy, data_width=64, channel=0):
         assert data_width >= 64, "Minimum 64-bit data width"
 
-        self.phy = phy
         self.data_width = data_width
         self.channel = channel
 

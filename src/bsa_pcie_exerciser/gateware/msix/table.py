@@ -1,7 +1,7 @@
 #
 # LitePCIe MSI-X Table Handler
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # BAR2 handler providing PCIe-accessible MSI-X table storage.
@@ -55,7 +55,6 @@ class LitePCIeMSIXTable(Module):
         assert data_width >= 64, "Minimum 64-bit data width"
         assert n_vectors <= 2048, "Max 2048 vectors"
 
-        self.phy        = phy
         self.data_width = data_width
         self.n_vectors  = n_vectors
 
@@ -365,7 +364,6 @@ class LitePCIeMSIXPBA(LiteXModule):
     """
 
     def __init__(self, phy, data_width, n_vectors=2048):
-        self.phy        = phy
         self.data_width = data_width
         self.n_vectors  = n_vectors
 

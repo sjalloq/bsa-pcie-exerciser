@@ -1,7 +1,7 @@
 #
 # LitePCIe Multi-BAR Endpoint
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # PCIe endpoint with multi-BAR routing support using bar_hit field.
@@ -37,6 +37,12 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
     phy : S7PCIEPHY (or compatible)
         PCIe PHY instance.
 
+    Note
+    ----
+    The PHY reference is stored as ``_phy`` and excluded from CSR collection
+    via ``autocsr_exclude`` to prevent the PHY's CSRs being duplicated under
+    this module's namespace.
+
     endianness : str
         Endianness for TLP processing ("big" or "little").
 
@@ -70,6 +76,8 @@ class LitePCIeMultiBAREndpoint(LiteXModule):
         PHY after the tx_filter (if any). Useful for Message TLPs like ATS
         Invalidation Completions that don't need PASID prefix injection.
     """
+
+    autocsr_exclude = {"phy"}  # Exclude the property from CSR collection
 
     def __init__(self, phy,
                  endianness="big",
@@ -344,7 +352,15 @@ class LitePCIeBAREndpoint(LiteXModule):
         PHY instance (for phy.id used in completions).
     """
 
+    autocsr_exclude = {"phy"}  # Exclude the property from CSR collection
+
     def __init__(self, crossbar, phy):
         self.crossbar   = crossbar
-        self.phy        = phy
+        self._phy       = phy
+
         self.data_width = phy.data_width
+
+    @property
+    def phy(self):
+        """Expose PHY for external access."""
+        return self._phy

@@ -1,7 +1,7 @@
 #
 # BSA PCIe Exerciser - ATS Invalidation Handler
 #
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # Handles ATS Invalidation Requests from the host IOMMU.
@@ -77,7 +77,6 @@ class ATSInvalidationHandler(LiteXModule):
     """
 
     def __init__(self, phy, data_width=64):
-        self.phy = phy
         self.data_width = data_width
 
         # =====================================================================

@@ -45,7 +45,6 @@ class BSADMABufferHandler(LiteXModule):
     def __init__(self, phy, buffer, data_width):
         assert data_width >= 64, "Minimum 64-bit data width"
 
-        self.phy = phy
         self.data_width = data_width
         self.poison_mode = Signal()
         self.poison_event = Signal()

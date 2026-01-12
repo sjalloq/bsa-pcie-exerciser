@@ -10,6 +10,7 @@
 
 from migen import *
 from litex.gen import *
+from litex.soc.interconnect.csr import CSRStatus
 
 
 # User-defined extended config space base (DWORD address).
@@ -49,6 +50,14 @@ class BSAConfigSpace(LiteXModule):
         self.error_code         = Signal(11)
         self.error_fatal        = Signal()
         self.ats_enable         = Signal()
+
+        # Debug CSRs - read-only visibility into config space registers.
+        self._ats_ctrl    = CSRStatus(32, name="ats_ctrl", description="ATS Control (read-only mirror)")
+        self._pasid_ctrl  = CSRStatus(32, name="pasid_ctrl", description="PASID Control (read-only mirror)")
+        self._acs_ctrl    = CSRStatus(32, name="acs_ctrl", description="ACS Control (read-only mirror)")
+        self._dpc_ctrl    = CSRStatus(32, name="dpc_ctrl", description="DPC Control (read-only mirror)")
+        self._dpc_status  = CSRStatus(32, name="dpc_status", description="DPC Status (read-only mirror)")
+        self._dvsec_ctrl  = CSRStatus(32, name="dvsec_ctrl", description="DVSEC Control (read-only mirror)")
 
         # # #
 
@@ -236,4 +245,14 @@ class BSAConfigSpace(LiteXModule):
                 self.dpc_status[1:3].eq(Mux(self.error_fatal, 0x2, 0x1)),
                 self.dpc_status[16:32].eq(phy.id),
             ),
+        ]
+
+        # Mirror config space registers to debug CSRs.
+        self.comb += [
+            self._ats_ctrl.status.eq(self.ats_ctrl),
+            self._pasid_ctrl.status.eq(self.pasid_ctrl),
+            self._acs_ctrl.status.eq(self.acs_ctrl),
+            self._dpc_ctrl.status.eq(self.dpc_ctrl),
+            self._dpc_status.status.eq(self.dpc_status),
+            self._dvsec_ctrl.status.eq(self.dvsec_ctrl),
         ]
