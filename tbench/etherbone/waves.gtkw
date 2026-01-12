@@ -1,0 +1,71 @@
+[*]
+[*] GTKWave Analyzer v3.3.126 (w)1999-2026 BSI
+[*] Sun Jan 11 21:25:25 2026
+[*]
+[dumpfile] "dump.fst"
+[dumpfile_mtime] "Sun Jan 11 20:48:50 2026"
+[dumpfile_size] 43355
+[savefile] "waves.gtkw"
+[timestart] 0
+[size] 1908 2038
+[pos] -1 -1
+*-21.915581 902600 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[sst_width] 290
+[signals_width] 365
+[sst_expanded] 1
+[sst_vpaned_height] 657
+@28
+$rootio.sys_clk
+$rootio.sys_rst
+@800200
+-USB I/F
+@22
+$rootio.usb_capture_data[31:0]
+@28
+$rootio.usb_capture_ready
+$rootio.usb_capture_valid
+@22
+$rootio.usb_inject_data[31:0]
+@28
+$rootio.usb_inject_ready
+$rootio.usb_inject_valid
+@22
+$rootio.usb_rx_fifo_level[7:0]
+@28
+$rootio.usb_tx_backpressure
+@22
+$rootio.usb_tx_fifo_level[7:0]
+@1000200
+-USB I/F
+@800200
+-Wishbone
+@28
+tb_etherbone.bus_cyc
+tb_etherbone.bus_stb
+tb_etherbone.bus_we
+@29
+tb_etherbone.bus_ack
+@22
+tb_etherbone.bus_adr[29:0]
+@28
+tb_etherbone.bus_bte[1:0]
+tb_etherbone.bus_cti[2:0]
+@22
+tb_etherbone.bus_dat_r[31:0]
+tb_etherbone.bus_dat_w[31:0]
+@28
+tb_etherbone.bus_err
+@22
+tb_etherbone.bus_sel[3:0]
+@1000200
+-Wishbone
+@28
+tb_etherbone.state[1:0]
+@22
+tb_etherbone.memadr[9:0]
+@28
+tb_etherbone.we
+@22
+tb_etherbone.dat_r[31:0]
+[pattern_trace] 1
+[pattern_trace] 0

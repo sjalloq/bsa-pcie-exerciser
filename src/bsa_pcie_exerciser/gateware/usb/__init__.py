@@ -7,12 +7,13 @@
 
 from .ft601 import FT601Sync
 from .core import USBCore
-from .etherbone import Etherbone
+from .etherbone import USBEtherbone, Etherbone
 from .monitor import USBMonitorSubsystem
 
 __all__ = [
     "FT601Sync",
     "USBCore",
-    "Etherbone",
+    "USBEtherbone",
+    "Etherbone",  # Backward compatibility alias
     "USBMonitorSubsystem",
 ]

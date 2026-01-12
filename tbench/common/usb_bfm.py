@@ -267,21 +267,31 @@ class USBBFM:
         Send Etherbone probe request.
 
         Used to discover Etherbone endpoints.
+
+        Note: Probe packets are padded to 12 bytes (header + 4 bytes padding).
+        The Depacketizer requires at least one payload word after header
+        extraction. Over Ethernet, MAC layer provides this padding implicitly.
+        Over USB, we must add it explicitly. See ETHERBONE_PROTOCOL_SPEC.md.
         """
-        packet = self._build_etherbone_packet(pf=True)
+        packet = self._build_etherbone_packet(pf=True)  # 8 bytes
+        packet += bytes(4)  # Padding - REQUIRED for USB transport
         await self.send_packet(USB_CHANNEL_ETHERBONE, packet)
 
-    async def wait_etherbone_probe_response(self, timeout_cycles: int = 1000) -> bool:
+    async def wait_etherbone_probe_response(self, timeout_cycles: int = 1000, debug: bool = False) -> bool:
         """
         Wait for Etherbone probe response.
 
         Returns:
             True if probe response received, False on timeout
         """
-        result = await self.receive_packet(timeout_cycles)
+        result = await self.receive_packet(timeout_cycles, debug=debug)
         if result is None:
+            if debug:
+                self.dut._log.info("wait_etherbone_probe_response: receive_packet returned None")
             return False
         channel, data = result
+        if debug:
+            self.dut._log.info(f"wait_etherbone_probe_response: channel={channel}, data={data.hex()}")
         if channel != USB_CHANNEL_ETHERBONE or len(data) < 4:
             return False
         # Check for probe response flag (pr=1)

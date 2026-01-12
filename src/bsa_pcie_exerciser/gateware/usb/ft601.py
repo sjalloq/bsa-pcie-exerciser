@@ -3,10 +3,11 @@
 #
 # Copyright (c) 2016 Florent Kermarrec <florent@enjoy-digital.fr>
 # Copyright (c) 2018-2019 Pierre-Olivier Vauboin <po@lambdaconcept.com>
-# Copyright (c) 2025 Shareef Jalloq
+# Copyright (c) 2025-2026 Shareef Jalloq
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# Ported from enjoy-digital/pcie_screamer with adaptations for BSA Exerciser.
+# FSM rewritten to match PCILeech pcileech_ft601.sv timing.
+# Original pcie_screamer FSM had timing issues with the FT601.
 #
 
 from migen import *
@@ -27,8 +28,8 @@ class FT601Sync(LiteXModule):
 
     Internally handles clock domain crossing between sys and usb (FT601's 100MHz).
 
-    The FSM arbitrates between read and write operations with a timeout
-    to ensure fair access when both directions have data pending.
+    The FSM uses PCILeech-style timing with proper wait states and cooldown
+    periods for reliable FT601 communication.
 
     Pads interface (from platform.request("usb_fifo")):
     - clk: 100MHz clock from FT601
@@ -69,238 +70,230 @@ class FT601Sync(LiteXModule):
         self.source = read_fifo.source   # RX: USB -> sys
 
         # ---------------------------------------------------------------------
+        # State encoding (matching PCILeech exactly)
+        # ---------------------------------------------------------------------
+        S_IDLE         = 0x0
+        S_RX_WAIT1     = 0x2
+        S_RX_WAIT2     = 0x3
+        S_RX_WAIT3     = 0x4
+        S_RX_ACTIVE    = 0x5
+        S_RX_COOLDOWN1 = 0x6
+        S_RX_COOLDOWN2 = 0x7
+        S_TX_WAIT1     = 0x8
+        S_TX_WAIT2     = 0x9
+        S_TX_ACTIVE    = 0xA
+        S_TX_COOLDOWN1 = 0xB
+        S_TX_COOLDOWN2 = 0xC
+
+        state = Signal(4, reset=S_IDLE)
+
+        # ---------------------------------------------------------------------
         # Tristate data bus
         # ---------------------------------------------------------------------
-        tdata_w = Signal(dw)
-        data_r = Signal(dw)
-        data_oe = Signal()
-        self.specials += Tristate(pads.data, tdata_w, data_oe, data_r)
 
-        # Register data for ODDR output
         data_w = Signal(dw)
-        _data_w = Signal(dw)
-        self.sync.usb += _data_w.eq(data_w)
+        data_r = Signal(dw)
 
-        # ODDR for data output (improves timing)
-        for i in range(dw):
-            self.specials += Instance("ODDR",
-                p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("usb"),
-                i_CE = 1,
-                i_S  = 0,
-                i_R  = 0,
-                i_D1 = _data_w[i],
-                i_D2 = data_w[i],
-                o_Q  = tdata_w[i],
-            )
-
-        # ---------------------------------------------------------------------
-        # Control signals with ODDR
-        # ---------------------------------------------------------------------
-        rd_n = Signal()
-        _rd_n = Signal(reset=1)
-        wr_n = Signal()
-        _wr_n = Signal(reset=1)
-        oe_n = Signal()
-        _oe_n = Signal(reset=1)
-
-        self.sync.usb += [
-            _rd_n.eq(rd_n),
-            _wr_n.eq(wr_n),
-            _oe_n.eq(oe_n),
-        ]
+        oe = Signal(reset=1)  # Tristate control: 1 = FPGA drives, 0 = hi-Z
 
         self.specials += [
-            Instance("ODDR",
-                p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("usb"),
-                i_CE = 1,
-                i_S  = 0,
-                i_R  = 0,
-                i_D1 = _rd_n,
-                i_D2 = rd_n,
-                o_Q  = pads.rd_n,
-            ),
-            Instance("ODDR",
-                p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("usb"),
-                i_CE = 1,
-                i_S  = 0,
-                i_R  = 0,
-                i_D1 = _wr_n,
-                i_D2 = wr_n,
-                o_Q  = pads.wr_n,
-            ),
-            Instance("ODDR",
-                p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("usb"),
-                i_CE = 1,
-                i_S  = 0,
-                i_R  = 0,
-                i_D1 = _oe_n,
-                i_D2 = oe_n,
-                o_Q  = pads.oe_n,
-            ),
+            Tristate(pads.data, data_w, oe, data_r),
+            Tristate(pads.be, 0XF, oe)
         ]
 
         # ---------------------------------------------------------------------
         # Static signals
         # ---------------------------------------------------------------------
         self.comb += [
-            pads.rst_n.eq(~ResetSignal("usb")),  # active low reset
-            pads.be.eq(0xF),                      # All bytes enabled
-            pads.siwu_n.eq(1),                    # No send immediate
-            data_oe.eq(oe_n),                     # OE active when oe_n is high (we're writing)
+            pads.siwu_n.eq(1),    # No send immediate
+            pads.rst_n.eq(1),     # Not in reset
         ]
 
         # ---------------------------------------------------------------------
-        # FSM State
+        # RX Data Path
+        # Write received data to read_buffer when valid
+        # Both data and valid are registered to match PCILeech timing:
+        # - Data captured on cycle N appears on dout at cycle N+1
+        # - Valid at cycle N+1 reflects conditions from cycle N
+        # This ensures data and valid are aligned correctly.
         # ---------------------------------------------------------------------
-        tempsendval = Signal(dw)
-        temptosend = Signal()
-        tempreadval = Signal(dw)
-        temptoread = Signal()
 
-        wants_read = Signal()
-        wants_write = Signal()
-        cnt_write = Signal(max=timeout + 1)
-        cnt_read = Signal(max=timeout + 1)
-        first_write = Signal()
+        data_r_reg = Signal(dw)
+        rx_valid = Signal()
 
-        self.comb += [
-            wants_read.eq(~temptoread & ~pads.rxf_n),
-            wants_write.eq((temptosend | write_fifo.source.valid) & (pads.txe_n == 0)),
-        ]
-
-        # ---------------------------------------------------------------------
-        # FSM (USB clock domain)
-        # ---------------------------------------------------------------------
-        self.fsm = fsm = ClockDomainsRenamer("usb")(FSM(reset_state="IDLE"))
-
-        # Handle pending read data outside FSM
         self.sync.usb += [
-            If(~fsm.ongoing("READ"),
-                If(temptoread,
-                    If(read_buffer.sink.ready,
-                        temptoread.eq(0),
-                    )
-                )
-            )
+            data_r_reg.eq(data_r),
+            rx_valid.eq(~pads.rxf_n & (state == S_RX_ACTIVE)),
         ]
 
         self.comb += [
-            If(~fsm.ongoing("READ"),
-                If(temptoread,
-                    read_buffer.sink.data.eq(tempreadval),
-                    read_buffer.sink.valid.eq(1),
-                )
-            )
+            read_buffer.sink.data.eq(data_r_reg),
+            read_buffer.sink.valid.eq(rx_valid),
+            # Note: We don't check ready - FT601 doesn't support backpressure
+            # The read_buffer should be sized to handle bursts
         ]
 
-        fsm.act("IDLE",
-            rd_n.eq(1),
-            wr_n.eq(1),
-            If(wants_write,
-                oe_n.eq(1),
-                NextValue(cnt_write, 0),
-                NextValue(first_write, 1),
-                NextState("WRITE"),
-            ).Elif(wants_read,
-                oe_n.eq(0),
-                NextState("RDWAIT"),
-            ).Else(
-                oe_n.eq(1),
-            )
+        # ---------------------------------------------------------------------
+        # TX Data Path - Registered output stage
+        # Read from write_fifo and send to FT601 via registered output
+        # This matches PCILeech timing where FT601_DATA_OUT[0] is registered
+        # ---------------------------------------------------------------------
+        # Forward signal - when we're actually sending data
+        tx_active = Signal()
+        self.comb += tx_active.eq(~pads.txe_n & (state == S_TX_ACTIVE))
+
+        # Registered output data
+        data_w_reg = Signal(dw)
+
+        # Latch data during TX_WAIT2 (pre-fetch) and TX_ACTIVE (streaming)
+        # This ensures data is stable before WR_N asserts in TX_WAIT2
+        tx_latch = Signal()
+        self.comb += tx_latch.eq(
+            ((state == S_TX_WAIT2) & write_fifo.source.valid) |
+            (tx_active & write_fifo.source.valid)
         )
 
-        fsm.act("WRITE",
-            If(wants_read,
-                NextValue(cnt_write, cnt_write + 1),
+        self.sync.usb += [
+            If(tx_latch,
+                data_w_reg.eq(write_fifo.source.data),
             ),
-            NextValue(first_write, 0),
-            rd_n.eq(1),
+        ]
 
-            If(pads.txe_n,
-                # TX FIFO full - go back to IDLE
-                oe_n.eq(1),
-                wr_n.eq(1),
-                write_fifo.source.ready.eq(0),
-                If(write_fifo.source.valid & ~first_write,
-                    NextValue(temptosend, 1),
-                ),
-                NextState("IDLE"),
-            ).Elif(temptosend,
-                # Send previously buffered data
-                oe_n.eq(1),
-                data_w.eq(tempsendval),
-                wr_n.eq(0),
-                NextValue(temptosend, 0),
-            ).Elif(cnt_write > timeout,
-                # Timeout - switch to read
-                oe_n.eq(0),
-                NextState("RDWAIT"),
-            ).Elif(write_fifo.source.valid,
-                # Send data from FIFO
-                oe_n.eq(1),
-                data_w.eq(write_fifo.source.data),
-                write_fifo.source.ready.eq(1),
-                NextValue(tempsendval, write_fifo.source.data),
-                NextValue(temptosend, 0),
-                wr_n.eq(0),
-            ).Else(
-                # No more data - go back to IDLE
-                oe_n.eq(1),
-                wr_n.eq(1),
-                NextValue(temptosend, 0),
-                NextState("IDLE"),
+        # Connect registered data to tristate output
+        self.comb += data_w.eq(data_w_reg)
+
+        # Consume from FIFO when latching new data
+        self.sync.usb += write_fifo.source.ready.eq(tx_latch)
+
+        # ---------------------------------------------------------------------
+        # Control Signals - exact PCILeech logic (active low outputs)
+        # All control signals are registered for proper timing
+        # ---------------------------------------------------------------------
+
+        # OE (tristate control) - LOW during RX states to release bus
+        # PCILeech: OE <= (rst || FT601_RXF_N || (not in RX OE states))
+        in_rx_oe_states = Signal()
+        self.comb += in_rx_oe_states.eq(
+            (state == S_RX_ACTIVE) | (state == S_RX_WAIT3) |
+            (state == S_RX_WAIT2) | (state == S_RX_COOLDOWN1) |
+            (state == S_RX_COOLDOWN2)
+        )
+        self.sync.usb += oe.eq(pads.rxf_n | ~in_rx_oe_states)
+
+        # FT601_OE_N - asserted (low) during RX_WAIT2, RX_WAIT3, RX_ACTIVE
+        # Use intermediate signal with reset=1 to ensure inactive at startup
+        in_rx_oe_n_states = Signal()
+        self.comb += in_rx_oe_n_states.eq(
+            (state == S_RX_ACTIVE) | (state == S_RX_WAIT3) | (state == S_RX_WAIT2)
+        )
+        oe_n_reg = Signal(reset=1)
+        self.sync.usb += oe_n_reg.eq(pads.rxf_n | ~in_rx_oe_n_states)
+        self.comb += pads.oe_n.eq(oe_n_reg)
+
+        # FT601_RD_N - asserted (low) during RX_WAIT3, RX_ACTIVE
+        # Use intermediate signal with reset=1 to ensure inactive at startup
+        in_rx_rd_states = Signal()
+        self.comb += in_rx_rd_states.eq(
+            (state == S_RX_ACTIVE) | (state == S_RX_WAIT3)
+        )
+        rd_n_reg = Signal(reset=1)
+        self.sync.usb += rd_n_reg.eq(pads.rxf_n | ~in_rx_rd_states)
+        self.comb += pads.rd_n.eq(rd_n_reg)
+
+        # FT601_WR_N - asserted (low) during TX_WAIT2 and TX_ACTIVE (when data available)
+        # Use intermediate signal with reset=1 to ensure inactive at startup
+        wr_condition = Signal()
+        self.comb += wr_condition.eq(
+            ~pads.txe_n & (
+                ((state == S_TX_ACTIVE) & write_fifo.source.valid)
             )
         )
+        wr_n_reg = Signal(reset=1)
+        self.sync.usb += wr_n_reg.eq(~wr_condition)
+        self.comb += pads.wr_n.eq(wr_n_reg)
 
-        fsm.act("RDWAIT",
-            # One cycle wait for OE to propagate
-            rd_n.eq(0),
-            oe_n.eq(0),
-            wr_n.eq(1),
-            NextValue(cnt_read, 0),
-            NextState("READ"),
-        )
+        # ---------------------------------------------------------------------
+        # State Machine - exact PCILeech transitions
+        # RX is prioritized over TX when both are available
+        # ---------------------------------------------------------------------
+        self.sync.usb += [
+            Case(state, {
+                # IDLE: prioritize RX over TX
+                S_IDLE: [
+                    If(~pads.rxf_n,
+                        state.eq(S_RX_WAIT1),
+                    ).Elif(~pads.txe_n & write_fifo.source.valid,
+                        state.eq(S_TX_WAIT1),
+                    ),
+                ],
 
-        fsm.act("READ",
-            If(wants_write,
-                NextValue(cnt_read, cnt_read + 1),
-            ),
-            wr_n.eq(1),
+                # RX path - 3 wait states before active
+                S_RX_WAIT1: [
+                    If(pads.rxf_n,
+                        state.eq(S_RX_COOLDOWN1),
+                    ).Else(
+                        state.eq(S_RX_WAIT2),
+                    ),
+                ],
+                S_RX_WAIT2: [
+                    If(pads.rxf_n,
+                        state.eq(S_RX_COOLDOWN1),
+                    ).Else(
+                        state.eq(S_RX_WAIT3),
+                    ),
+                ],
+                S_RX_WAIT3: [
+                    If(pads.rxf_n,
+                        state.eq(S_RX_COOLDOWN1),
+                    ).Else(
+                        state.eq(S_RX_ACTIVE),
+                    ),
+                ],
+                S_RX_ACTIVE: [
+                    If(pads.rxf_n,
+                        state.eq(S_RX_COOLDOWN1),
+                    ),
+                    # else stay in RX_ACTIVE
+                ],
+                S_RX_COOLDOWN1: [
+                    state.eq(S_RX_COOLDOWN2),
+                ],
+                S_RX_COOLDOWN2: [
+                    state.eq(S_IDLE),
+                ],
 
-            If(pads.rxf_n,
-                # RX FIFO empty - go back to IDLE
-                oe_n.eq(0),
-                rd_n.eq(1),
-                NextState("IDLE"),
-            ).Elif(cnt_read > timeout,
-                # Timeout - switch to write
-                NextValue(cnt_write, 0),
-                NextValue(first_write, 1),
-                NextState("WRITE"),
-                oe_n.eq(1),
-            ).Else(
-                # Read data
-                oe_n.eq(0),
-                read_buffer.sink.valid.eq(1),
-                read_buffer.sink.data.eq(data_r),
-                NextValue(tempreadval, data_r),
-                If(read_buffer.sink.ready,
-                    rd_n.eq(0),
-                ).Else(
-                    NextValue(temptoread, 1),
-                    NextState("IDLE"),
-                    rd_n.eq(1),
-                )
-            )
-        )
+                # TX path - 2 wait states before active
+                S_TX_WAIT1: [
+                    If(pads.txe_n,
+                        state.eq(S_TX_COOLDOWN1),
+                    ).Else(
+                        state.eq(S_TX_WAIT2),
+                    ),
+                ],
+                S_TX_WAIT2: [
+                    If(pads.txe_n,
+                        state.eq(S_TX_COOLDOWN1),
+                    ).Else(
+                        state.eq(S_TX_ACTIVE),
+                    ),
+                ],
+                S_TX_ACTIVE: [
+                    If(pads.txe_n | ~write_fifo.source.valid,
+                        state.eq(S_TX_COOLDOWN1),
+                    ),
+                    # else stay in TX_ACTIVE
+                ],
+                S_TX_COOLDOWN1: [
+                    state.eq(S_TX_COOLDOWN2),
+                ],
+                S_TX_COOLDOWN2: [
+                    state.eq(S_IDLE),
+                ],
+            }),
+        ]
 
         # Debug signals
-        self.rd_n = rd_n
-        self.wr_n = wr_n
-        self.oe_n = oe_n
+        self.state = state
+        self.oe = oe
         self.data_w = data_w
         self.data_r = data_r

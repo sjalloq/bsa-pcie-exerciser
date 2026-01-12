@@ -129,6 +129,50 @@ class SquirrelSoC(BSAExerciserSoC):
                 "-group [get_clocks {{clk125_clk clk250_clk squirrelsoc_s7pciephy_clkout*}}]"
             )
 
+        # ---------------------------------------------------------------------
+        # FT601 Timing Constraints
+        # ---------------------------------------------------------------------
+
+        if not simulation:
+
+            # Input delays for FT601 signals (data, status)
+            platform.add_platform_command(
+                "set_input_delay -clock [get_clocks usb_fifo_clk] -min 6.5 "
+                "[get_ports {{usb_fifo_data[*]}}]"
+            )
+            platform.add_platform_command(
+                "set_input_delay -clock [get_clocks usb_fifo_clk] -max 7.0 "
+                "[get_ports {{usb_fifo_data[*]}}]"
+            )
+            platform.add_platform_command(
+                "set_input_delay -clock [get_clocks usb_fifo_clk] -min 6.5 "
+                "[get_ports {{usb_fifo_rxf_n usb_fifo_txe_n}}]"
+            )
+            platform.add_platform_command(
+                "set_input_delay -clock [get_clocks usb_fifo_clk] -max 7.0 "
+                "[get_ports {{usb_fifo_rxf_n usb_fifo_txe_n}}]"
+            )
+
+            # Output delays for FT601 control signals
+            platform.add_platform_command(
+                "set_output_delay -clock [get_clocks usb_fifo_clk] -min 4.8 "
+                "[get_ports {{usb_fifo_wr_n usb_fifo_rd_n usb_fifo_oe_n}}]"
+            )
+            platform.add_platform_command(
+                "set_output_delay -clock [get_clocks usb_fifo_clk] -max 1.0 "
+                "[get_ports {{usb_fifo_wr_n usb_fifo_rd_n usb_fifo_oe_n}}]"
+            )
+
+            # Output delays for FT601 data and byte enables
+            platform.add_platform_command(
+                "set_output_delay -clock [get_clocks usb_fifo_clk] -min 4.8 "
+                "[get_ports {{usb_fifo_be[*] usb_fifo_data[*]}}]"
+            )
+            platform.add_platform_command(
+                "set_output_delay -clock [get_clocks usb_fifo_clk] -max 1.0 "
+                "[get_ports {{usb_fifo_be[*] usb_fifo_data[*]}}]"
+            )
+
 
     def _add_usb_monitor(self):
         """Add USB TLP monitor subsystem on channel 1."""
