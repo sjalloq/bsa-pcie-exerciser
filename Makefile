@@ -78,7 +78,7 @@ release-upload: release ## Upload release artifacts with GitHub CLI
 		"$(RELEASE_DIR)"/*
 
 repopack: ## Package repo for upload to LLM
-	repopack -i .venv,.git,build,build_*,logs,docs,external,.vscode,*.txt -o $(BSA_EXERCISER).txt
+	repopack -i .venv,.git,build,build_*,logs,docs,external,.vscode,*.txt,software/target,cargo.lock -o $(BSA_EXERCISER).txt
 
 wc: ## Count non-empty, non-comment lines of Migen code
 	@find src -name "*.py" -exec cat {} + | grep -vE '^\s*(#|$$)' | wc -l

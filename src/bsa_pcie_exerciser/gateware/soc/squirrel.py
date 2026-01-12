@@ -88,7 +88,8 @@ class SquirrelSoC(BSAExerciserSoC):
         # buffer_depth must accommodate the largest burst: 1 base_addr + N read/write addresses
         # Default of 4 causes deadlock for bursts > 3 addresses (PacketFIFO needs entire
         # payload before 'last' commits the params, but full FIFO blocks upstream)
-        self.etherbone = Etherbone(self.usb_core, channel_id=0, buffer_depth=16)
+        # 64 supports bursts of up to 63 addresses.
+        self.etherbone = Etherbone(self.usb_core, channel_id=0, buffer_depth=64)
         self.bus.add_master("usb", master=self.etherbone.master.bus)
 
         # USB Monitor Subsystem on channel 1
